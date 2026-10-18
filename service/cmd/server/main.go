@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -21,7 +22,39 @@ import (
 	"distributed-ai/service/internal/replica"
 )
 
+// version is overridden at release build time:
+//   go build -ldflags "-X main.version=v0.9-alpha" ./service/cmd/server
+var version = "dev"
+
 func main() {
+	// --help/--version must exit immediately with status 0.
+	// CI probes `<binary> --help` as an executability check: it must never
+	// fall through to server startup (which blocks forever).
+	for _, a := range os.Args[1:] {
+		switch a {
+		case "-h", "--help":
+			fmt.Print(`dain-svc — Distributed AI central service
+
+Usage:
+  dain-svc
+
+Environment:
+  LISTEN_ADDR        HTTP listen address (default :8080)
+  MODELS_DIR         model manifest directory (default ../models)
+  ENGINE_BIN         llama-server binary path (optional)
+  MODEL_PATH         model file path (optional, requires ENGINE_BIN)
+  ENGINE_PORT        engine port (default 18080)
+  ENGINE_CTX_SIZE    engine context size override (low-memory boxes)
+  TEST_FUND          alpha testing account funding
+  FOUNDER_ACCOUNT / FOUNDER_SHARE_ENABLED
+`)
+			os.Exit(0)
+		case "--version":
+			fmt.Println("dain-svc " + version)
+			os.Exit(0)
+		}
+	}
+
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
 		addr = ":8080"
