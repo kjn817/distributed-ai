@@ -194,6 +194,11 @@ echo "[7/8] Setting up systemd services..."
 mkdir -p "$HOME/.config/systemd/user"
 
 # API 서버 서비스
+#
+# 엔진 공유 모드: dain-svc는 로컬 llama-server를 띄우지 않고,
+# Node가 소유한 엔진(http://127.0.0.1:18082)을 ENGINE_URL로 공유 사용.
+# 동일 0.5B 모델을 두 번 로딩하면 1GB RAM에서 OOM → 단일 엔진으로 ~568MB 절약.
+# Node 시작 전까지는 /v1/chat/completions이 503 (수 초 내 복구).
 cat > "$HOME/.config/systemd/user/distributed-ai-alpha.service" << EOF
 [Unit]
 Description=Distributed AI Alpha - API Service (control plane)
@@ -204,10 +209,7 @@ Type=simple
 WorkingDirectory=$INSTALL_DIR
 Environment=MODELS_DIR=$MODELS_DIR
 Environment=LISTEN_ADDR=127.0.0.1:8080
-Environment=ENGINE_BIN=$ENGINE_DIR/build/bin/llama-server
-Environment=MODEL_PATH=$MODEL_FILE
-Environment=ENGINE_CTX_SIZE=512
-Environment=LD_LIBRARY_PATH=$ENGINE_DIR/build/bin
+Environment=ENGINE_URL=http://127.0.0.1:18082
 ExecStart=$INSTALL_DIR/bin/dain-svc
 Restart=on-failure
 RestartSec=10
@@ -232,6 +234,8 @@ EOF
 #
 # 주의: cgroup 한도는 최대치이며, 실제 사용량은 그 이하.
 # 메모리 초과 방지를 위해 보수적으로 설정.
+# Node가 단일 llama-server의 소유자 (포트 18082, cgroup 70% 강제).
+# dain-svc(API)는 ENGINE_URL로 이 엔진을 공유 사용.
 cat > "$HOME/.config/systemd/user/distributed-ai-alpha-node.service" << EOF
 [Unit]
 Description=Distributed AI Alpha - Node (resource provider)
@@ -241,6 +245,7 @@ After=network.target distributed-ai-alpha.service
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 Environment=ENGINE_BIN=$ENGINE_DIR/build/bin/llama-server
+Environment=MODEL_ID=qwen2.5-0.5b-q4
 Environment=MODEL_PATH=$MODEL_FILE
 Environment=ENGINE_CTX_SIZE=512
 Environment=LD_LIBRARY_PATH=$ENGINE_DIR/build/bin
