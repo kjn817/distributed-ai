@@ -85,6 +85,9 @@ Environment:
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// mgr is non-nil only in local-engine mode (ENGINE_BIN+MODEL_PATH).
+	// In ENGINE_URL (shared) mode there is no local process to stop.
+	var mgr *engine.Manager
 	if url := os.Getenv("ENGINE_URL"); url != "" {
 		re := engine.NewRemote(url)
 		srv.WithEngine(re)
@@ -104,7 +107,7 @@ Environment:
 				cfg.CtxSize = n
 			}
 		}
-		mgr := engine.New(cfg)
+		mgr = engine.New(cfg)
 		log.Printf("starting inference engine: %s", bin)
 		if err := mgr.Start(ctx); err != nil {
 			log.Fatalf("engine failed: %v", err)
