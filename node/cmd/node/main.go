@@ -395,7 +395,11 @@ func main() {
 					return reporter.LimitsReport{}
 				}
 				st := mgr.LimitsStatus()
-				return reporter.LimitsReport{Enforced: st.Enforced, Mechanism: st.Mechanism, Reason: st.Reason}
+				return reporter.LimitsReport{
+					Enforced: st.Enforced, Mechanism: st.Mechanism, Reason: st.Reason,
+					CPUEnforced: st.CPUEnforced, CPUDetail: st.CPUDetail,
+					RAMEnforced: st.RAMEnforced, RAMDetail: st.RAMDetail,
+				}
 			},
 			Interval: 30 * time.Second,
 			OnErr:    func(err error) { fmt.Println("Reporter:", err) },
