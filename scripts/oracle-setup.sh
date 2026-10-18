@@ -234,8 +234,15 @@ EOF
 #
 # 주의: cgroup 한도는 최대치이며, 실제 사용량은 그 이하.
 # 메모리 초과 방지를 위해 보수적으로 설정.
-# Node가 단일 llama-server의 소유자 (포트 18082, cgroup 70% 강제).
+# Node가 단일 llama-server의 소유자 (포트 18082).
 # dain-svc(API)는 ENGINE_URL로 이 엔진을 공유 사용.
+#
+# 자원 제한 2층 구조:
+#   1. systemd 레벨 (이 파일): CPUQuota=70%, MemoryMax=700M — 커널이 강제.
+#      user systemd 서비스는 자체 cgroup을 못 만들지만, systemd가 대신
+#      서비스 cgroup에 제한을 걸어줌. Node는 DetectExisting()으로 감지.
+#   2. Node 내부 (limits.Apply): 자체 cgroup 생성 시도 → 권한 없으면
+#      systemd 제한을 감지해 per-resource로 보고 (cpu_enforced/ram_enforced).
 cat > "$HOME/.config/systemd/user/distributed-ai-alpha-node.service" << EOF
 [Unit]
 Description=Distributed AI Alpha - Node (resource provider)
@@ -252,6 +259,9 @@ Environment=LD_LIBRARY_PATH=$ENGINE_DIR/build/bin
 ExecStart=$INSTALL_DIR/bin/dain-node --api http://127.0.0.1:8080 --cpu 70 --ram 70 --storage 20
 Restart=on-failure
 RestartSec=10
+# OS 레벨 자원 강제 (Node 자체 cgroup 생성 불가 시의 1차 방어선)
+CPUQuota=70%
+MemoryMax=700M
 
 [Install]
 WantedBy=default.target
