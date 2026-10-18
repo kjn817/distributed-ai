@@ -142,10 +142,16 @@ type ReceivedFrom struct {
 }
 
 // LimitsReport is the OS resource-cap enforcement status.
+// CPUEnforced/RAMEnforced carry per-resource truth; Enforced is true
+// only when every requested cap is active.
 type LimitsReport struct {
-	Enforced  bool   `json:"enforced"`
-	Mechanism string `json:"mechanism,omitempty"`
-	Reason    string `json:"reason,omitempty"`
+	Enforced    bool   `json:"enforced"`
+	Mechanism   string `json:"mechanism,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	CPUEnforced bool   `json:"cpu_enforced,omitempty"`
+	CPUDetail   string `json:"cpu_detail,omitempty"`
+	RAMEnforced bool   `json:"ram_enforced,omitempty"`
+	RAMDetail   string `json:"ram_detail,omitempty"`
 }
 
 // Heartbeat POSTs liveness and returns model IDs the service wants this
