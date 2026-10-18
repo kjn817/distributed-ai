@@ -38,8 +38,8 @@ jobs:
           CGO_ENABLED: 0
         run: |
           mkdir -p dist
-          go build -o dist/dain-svc-${{ matrix.goos }}-${{ matrix.goarch }} ./service/cmd/server
-          go build -o dist/dain-node-${{ matrix.goos }}-${{ matrix.goarch }} ./node/cmd/node
+          go build -ldflags "-X main.version=${{ inputs.version }}" -o dist/dain-svc-${{ matrix.goos }}-${{ matrix.goarch }} ./service/cmd/server
+          go build -ldflags "-X main.version=${{ inputs.version }}" -o dist/dain-node-${{ matrix.goos }}-${{ matrix.goarch }} ./node/cmd/node
           # Windows needs .exe
           if [ "${{ matrix.goos }}" = "windows" ]; then
             mv dist/dain-svc-${{ matrix.goos }}-${{ matrix.goarch }} dist/dain-svc-${{ matrix.goos }}-${{ matrix.goarch }}.exe
@@ -120,10 +120,14 @@ jobs:
       - name: Verify Linux Go binaries
         run: |
           chmod +x dist/dain-svc-linux-amd64 dist/dain-node-linux-amd64
-          echo "=== dain-svc ==="
-          dist/dain-svc-linux-amd64 --help 2>&1 | head -5 || echo "(no --help, checking version)"
-          echo "=== dain-node ==="
-          dist/dain-node-linux-amd64 --help 2>&1 | head -5 || echo "(no --help, checking version)"
+          echo "=== dain-svc --help (must exit 0 within 10s) ==="
+          timeout 10 dist/dain-svc-linux-amd64 --help
+          echo "=== dain-svc --version ==="
+          timeout 10 dist/dain-svc-linux-amd64 --version
+          echo "=== dain-node --help (must exit 0 within 10s) ==="
+          timeout 10 dist/dain-node-linux-amd64 --help
+          echo "=== dain-node --version ==="
+          timeout 10 dist/dain-node-linux-amd64 --version
           echo "PASS: Linux Go binaries executable"
 
       - name: Verify engine package (extract + run)
@@ -134,8 +138,8 @@ jobs:
           find /tmp/engine-test -type f | head -10
           echo "=== Verify llama-server exists at expected path ==="
           test -f /tmp/engine-test/build/bin/llama-server || (echo "FAIL: build/bin/llama-server not found" && exit 1)
-          echo "=== Run llama-server --version ==="
-          LD_LIBRARY_PATH=/tmp/engine-test/build/bin /tmp/engine-test/build/bin/llama-server --version
+          echo "=== Run llama-server --version (must exit within 30s) ==="
+          timeout 30 env LD_LIBRARY_PATH=/tmp/engine-test/build/bin /tmp/engine-test/build/bin/llama-server --version
           echo "PASS: Engine package extracts and runs"
 
       - name: Verify Windows binaries exist
