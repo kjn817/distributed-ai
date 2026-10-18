@@ -82,29 +82,32 @@ if ! curl -sL --fail -o "/tmp/SHA256SUMS.txt" "${BIN_BASE}/SHA256SUMS.txt"; then
 fi
 
 # SHA-256 검증 함수
+# $1: 로컬 파일 경로, $2: SHA256SUMS.txt에 기록된 에셋 이름 (정확히 일치해야 함)
+# 주의: grep 부분 매칭 금지 — "dain-svc"로 검색하면 darwin/windows 변종까지 4개가 매칭됨
 verify_sha256() {
     local file="$1"
-    local filename=$(basename "$file")
-    local expected=$(grep -F " $filename" /tmp/SHA256SUMS.txt | awk '{print $1}')
+    local asset_name="$2"
+    local expected=$(awk -v name="$asset_name" '$2 == name {print $1}' /tmp/SHA256SUMS.txt)
     if [ -z "$expected" ]; then
-        echo "  ERROR: No SHA-256 entry for $filename in SHA256SUMS.txt"
+        echo "  ERROR: No SHA-256 entry for $asset_name in SHA256SUMS.txt"
         return 1
     fi
     local actual=$(sha256sum "$file" | awk '{print $1}')
     if [ "$actual" != "$expected" ]; then
-        echo "  ERROR: SHA-256 mismatch for $filename!"
+        echo "  ERROR: SHA-256 mismatch for $asset_name!"
         echo "    Expected: $expected"
         echo "    Actual:   $actual"
         return 1
     fi
-    echo "  SHA-256 verified: $filename"
+    echo "  SHA-256 verified: $asset_name"
     return 0
 }
 
 download_binary() {
     local name="$1"
+    local asset="${name}-linux-amd64"
     local dest="$INSTALL_DIR/bin/$name"
-    local remote="${BIN_BASE}/${name}-linux-amd64"
+    local remote="${BIN_BASE}/${asset}"
     echo "  Downloading $name..."
     if ! curl -sL --fail -o "$dest" "$remote"; then
         echo "  ERROR: Failed to download $name from release ${RELEASE_TAG}."
@@ -112,7 +115,7 @@ download_binary() {
         exit 1
     fi
     chmod +x "$dest"
-    if ! verify_sha256 "$dest"; then
+    if ! verify_sha256 "$dest" "$asset"; then
         echo "  설치를 중단합니다."
         exit 1
     fi
@@ -137,7 +140,7 @@ if ! curl -sL --fail -o "/tmp/$ENGINE_PKG" "${BIN_BASE}/${ENGINE_PKG}"; then
     echo "  설치를 중단합니다."
     exit 1
 fi
-if ! verify_sha256 "/tmp/$ENGINE_PKG"; then
+if ! verify_sha256 "/tmp/$ENGINE_PKG" "$ENGINE_PKG"; then
     echo "  설치를 중단합니다."
     exit 1
 fi
