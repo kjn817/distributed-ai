@@ -44,6 +44,9 @@ Environment:
   ENGINE_BIN         llama-server binary path (optional)
   MODEL_PATH         model file path (optional, requires ENGINE_BIN)
   ENGINE_PORT        engine port (default 18080)
+  ENGINE_URL         use a shared remote engine instead of starting one
+                     (e.g. http://127.0.0.1:18082 for the node's engine;
+                     saves ~568MB on 1GB boxes by not loading the model twice)
   ENGINE_CTX_SIZE    engine context size override (low-memory boxes)
   TEST_FUND          alpha testing account funding
   FOUNDER_ACCOUNT / FOUNDER_SHARE_ENABLED
@@ -72,14 +75,21 @@ Environment:
 		log.Fatalf("load models: %v", err)
 	}
 
-	// Optional local engine: ENGINE_BIN + MODEL_PATH must both be set.
-	// Without them the service runs in control-plane-only mode and
-	// /v1/chat/completions returns 503 engine_not_ready.
+	// Inference engine, three modes (first match wins):
+	//   1. ENGINE_URL — shared remote engine (e.g. the node's engine on
+	//      127.0.0.1:18082). No local process; saves ~568MB on 1GB boxes.
+	//      Ready() polls /health, so chat 503s only until the owner is up.
+	//   2. ENGINE_BIN + MODEL_PATH — start a local llama-server (default 18080).
+	//   3. Neither — control-plane-only; /v1/chat/completions returns
+	//      503 engine_not_ready.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var mgr *engine.Manager
-	if bin, model := os.Getenv("ENGINE_BIN"), os.Getenv("MODEL_PATH"); bin != "" && model != "" {
+	if url := os.Getenv("ENGINE_URL"); url != "" {
+		re := engine.NewRemote(url)
+		srv.WithEngine(re)
+		log.Printf("using shared engine at %s (waiting for owner to come up)", url)
+	} else if bin, model := os.Getenv("ENGINE_BIN"), os.Getenv("MODEL_PATH"); bin != "" && model != "" {
 		port := 18080
 		if p := os.Getenv("ENGINE_PORT"); p != "" {
 			if n, err := strconv.Atoi(p); err == nil {
@@ -94,7 +104,7 @@ Environment:
 				cfg.CtxSize = n
 			}
 		}
-		mgr = engine.New(cfg)
+		mgr := engine.New(cfg)
 		log.Printf("starting inference engine: %s", bin)
 		if err := mgr.Start(ctx); err != nil {
 			log.Fatalf("engine failed: %v", err)
