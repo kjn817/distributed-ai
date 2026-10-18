@@ -79,7 +79,7 @@ jobs:
           mkdir -p dist/engine/build/bin
           cp engines/llama.cpp/build/bin/llama-server dist/engine/build/bin/
           cp engines/llama.cpp/build/bin/ggml-rpc-server dist/engine/build/bin/
-          cp engines/llama.cpp/build/bin/*.so dist/engine/build/bin/ 2>/dev/null || true
+          cp engines/llama.cpp/build/bin/*.so* dist/engine/build/bin/ 2>/dev/null || true
           # Verify it runs (checks shared lib resolution)
           LD_LIBRARY_PATH=dist/engine/build/bin dist/engine/build/bin/llama-server --version
           tar -czf dist/llama-engine-linux-amd64.tar.gz -C dist/engine .
