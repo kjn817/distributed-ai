@@ -43,6 +43,10 @@ import (
 	jobprotocol "distributed-ai/protocol"
 )
 
+// version is overridden at release build time:
+//   go build -ldflags "-X main.version=v0.9-alpha" ./node/cmd/node
+var version = "dev"
+
 func printLocalInfo(info protocol.ResourceInfo) {
 	fmt.Println("================================")
 	fmt.Println(" Distributed AI Node v0.8")
@@ -97,6 +101,26 @@ func main() {
 	rpcPort := flag.Int("rpc-port", 0, "run as RPC worker on this port (0 = disabled); needs RPC_BIN and a model")
 	rpcAnnounce := flag.String("rpc-announce", "", "address to advertise for RPC (default: auto-detected outbound IP)")
 	claimOnly := flag.Bool("claim", false, "prove peer-ID ownership to the service and print an API key for the node's earnings account, then exit")
+
+	// Fast --help/--version exit with status 0, before flag.Parse().
+	// CI probes `<binary> --help` as an executability check: the process
+	// must terminate promptly and must never fall through to node startup
+	// (Go's flag package would otherwise exit 2 on --help).
+	for _, a := range os.Args[1:] {
+		switch a {
+		case "-h", "--help":
+			fmt.Println("dain-node — Distributed AI Node Runtime")
+			fmt.Println()
+			fmt.Println("Usage: dain-node [options]")
+			fmt.Println()
+			fmt.Println("Options:")
+			flag.PrintDefaults()
+			os.Exit(0)
+		case "--version":
+			fmt.Println("dain-node " + version)
+			os.Exit(0)
+		}
+	}
 	flag.Parse()
 
 	// Identity first: everything else keys off the peer ID.
