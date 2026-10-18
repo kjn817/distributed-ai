@@ -1,0 +1,51 @@
+# Qwen2.5-0.5B-Instruct Q4_K_M — model manifest (M1 base model)
+# Values verified 2026-10-17. A model is only valid if the file on disk
+# matches size_bytes AND sha256. See service/internal/model.
+model_id: qwen2.5-0.5b-q4
+version: 1
+format: gguf
+quant: q4_k_m
+size_bytes: 491400032
+sha256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db
+source:
+    type: huggingface
+    repo: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+    file: qwen2.5-0.5b-instruct-q4_k_m.gguf
+license: Apache-2.0
+license_url: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+execution:
+    strategies: ["FULL_MATERIALIZE"]
+requirements:
+    storage_bytes: 491400032
+    memory_bytes: 1073741824
+    min_nodes: 1
+replication:
+    min: 2
+    target: 3
+chunks:
+    size_bytes: 67108864
+    list:
+        - index: 0
+          size_bytes: 67108864
+          sha256: bdefe8037c620ab1baee2463ac7abc6ac653dc9dcdf7c7421386d13fd32ac77c
+        - index: 1
+          size_bytes: 67108864
+          sha256: 5cdd27186451505225866d9c9d4a8a86e86a56b748c7b6d57e8c200467993237
+        - index: 2
+          size_bytes: 67108864
+          sha256: 1658bdb6f2f82fd2256e8bec73c350e4c31aa36237c9ab5422bf01a2b7a1a20d
+        - index: 3
+          size_bytes: 67108864
+          sha256: 8619a9a5293c9e9284d16577370048d2d6572ba21eb0e085a1eec04dd4878855
+        - index: 4
+          size_bytes: 67108864
+          sha256: 2d1f2b3a328462a9c17539431573f698dd08768af91961cdf27e098a366914c7
+        - index: 5
+          size_bytes: 67108864
+          sha256: d7b74c97e480612ccf7cefd91440c6cb30b6e886efdeb6898d399c9f9966f1c4
+        - index: 6
+          size_bytes: 67108864
+          sha256: e1bd03becbfcd699ebfc62baff5ce2cecea77c7affdb02cba047fb3e6c384022
+        - index: 7
+          size_bytes: 21637984
+          sha256: 58971bc7f7f9778f05284b489d1363266fb80ba15d75f1b657f7a47dab8b3e08

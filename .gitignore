@@ -1,0 +1,40 @@
+# Go
+*.exe
+*.test
+*.out
+
+# Models (large, download separately via setup script)
+*.gguf
+
+# llama.cpp source (clone separately, not part of this repo)
+engines/llama.cpp/
+
+# Binaries (use GitHub Releases)
+/bin/
+/build/
+
+# Node identity (sensitive — never commit)
+**/identity.key
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+!**/*.key.example
+
+# SSH
+.ssh/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build cache
+__pycache__/
+.pytest_cache/
+node_modules/

@@ -1,0 +1,87 @@
+# Builds prebuilt llama.cpp engine packages (llama-server) for the Node app.
+# The Node runtime auto-downloads the matching package; users never build.
+#
+# Pinned to a llama.cpp commit for reproducible engines. Bump deliberately.
+name: engines
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "engines/**"
+      - ".github/workflows/engines.yml"
+
+env:
+  LLAMA_CPP_REF: "10b8b7553494f3638da7668cf17cac089229122a" # pinned 2026-10-17; bump deliberately
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.backend }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - { os: linux,   backend: cpu,    runner: ubuntu-latest }
+          - { os: linux,   backend: vulkan, runner: ubuntu-latest }
+          # Windows x86_64
+          - { os: windows, backend: cpu,    runner: windows-latest }
+          # macOS arm64
+          - { os: macos,   backend: metal,  runner: macos-latest }
+          - { os: macos,   backend: cpu,    runner: macos-latest }
+          # TODO: GPU 툴킷 CI 설치가 준비되면 활성화
+          # - { os: linux,   backend: cuda,   runner: ubuntu-latest }
+          # - { os: linux,   backend: rocm,   runner: ubuntu-latest }
+          # - { os: windows, backend: cuda,   runner: windows-latest }
+          # - { os: windows, backend: vulkan, runner: windows-latest }  # Vulkan SDK 필요
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/llama.cpp
+          ref: ${{ env.LLAMA_CPP_REF }}
+          path: llama.cpp
+
+      - name: Install deps (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential \
+            $([ "${{ matrix.backend }}" = "vulkan" ] && echo "glslc libvulkan-dev")
+          # CUDA / ROCm toolkits installed via upstream installers in dedicated steps
+
+      - name: Configure
+        run: |
+          BACKEND_ARGS=""
+          case "${{ matrix.backend }}" in
+            cuda)   BACKEND_ARGS="-DGGML_CUDA=ON" ;;
+            vulkan) BACKEND_ARGS="-DGGML_VULKAN=ON" ;;
+            metal)  BACKEND_ARGS="-DGGML_METAL=ON" ;;
+            rocm)   BACKEND_ARGS="-DGGML_HIPBLAS=ON -DCMAKE_CXX_COMPILER=hipcc" ;;
+          esac
+          cmake -S llama.cpp -B build \
+            -DGGML_NATIVE=OFF \
+            -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_SERVER=ON \
+            $BACKEND_ARGS
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          BIN=$(find build -name 'llama-server*' -type f | head -1)
+          cp "$BIN" dist/
+          # TODO: sign binaries here (requires certs; see docs)
+          tar -czf engine-${{ matrix.os }}-x64-${{ matrix.backend }}.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.os }}-x64-${{ matrix.backend }}
+          path: engine-*.tar.gz

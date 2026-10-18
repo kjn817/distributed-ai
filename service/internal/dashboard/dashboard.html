@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed AI Network</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1a1d21; --mut:#6b7280;
+          --acc:#2563eb; --ok:#16a34a; --warn:#d97706; --lock:#9ca3af; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { background:var(--ink); color:#fff; padding:18px 28px; }
+  header h1 { margin:0; font-size:20px; font-weight:650; }
+  header p { margin:4px 0 0; color:#9ca3af; font-size:13px; }
+  main { max-width:1080px; margin:0 auto; padding:24px 20px 60px; }
+  h2 { font-size:16px; margin:28px 0 12px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .card { background:var(--card); border-radius:10px; padding:14px 16px;
+          box-shadow:0 1px 3px rgba(0,0,0,.07); }
+  .card .v { font-size:24px; font-weight:700; }
+  .card .l { font-size:12px; color:var(--mut); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; background:var(--card);
+          border-radius:10px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.07);
+          font-size:13px; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid #eef0f3; }
+  th { color:var(--mut); font-weight:600; font-size:12px; text-transform:uppercase; }
+  tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px;
+          font-size:12px; font-weight:600; }
+  .p-active,.p-healthy { background:#dcfce7; color:var(--ok); }
+  .p-eligible { background:#dbeafe; color:var(--acc); }
+  .p-locked { background:#f3f4f6; color:var(--lock); }
+  .p-unhealthy { background:#fef3c7; color:var(--warn); }
+  .bar { height:8px; background:#eef0f3; border-radius:99px; overflow:hidden; min-width:90px; }
+  .bar > div { height:100%; background:var(--acc); border-radius:99px; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .foot { color:var(--mut); font-size:12px; margin-top:28px; }
+  #err { display:none; background:#fef2f2; color:#b91c1c; padding:10px 14px;
+         border-radius:8px; margin-bottom:12px; font-size:13px; }
+  .ref { color:var(--mut); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Distributed AI Network</h1>
+  <p>volunteer compute &middot; P2P model distribution &middot; credit economy &mdash; <span id="ver"></span></p>
+</header>
+<main>
+  <div id="err"></div>
+
+  <h2>Network</h2>
+  <div class="cards" id="net"></div>
+
+  <h2>Model Quest</h2>
+  <table><thead><tr><th>Model</th><th>State</th><th>Progress</th><th></th></tr></thead>
+  <tbody id="quest"></tbody></table>
+
+  <h2>Models &amp; Replication</h2>
+  <table><thead><tr><th>Model</th><th>Status</th><th>Holders</th><th>Desired</th><th>Health</th><th>Requests</th><th>RPS</th></tr></thead>
+  <tbody id="models"></tbody></table>
+
+  <h2>Nodes</h2>
+  <p style="color:var(--mut);font-size:12px">Role: <b>compute</b> = request routing (single-node inference) ·
+  <b>RPC worker</b> = joint compute (one request, multiple nodes via llama.cpp RPC) ·
+  <b>storage</b> = replica holder only.</p>
+  <table><thead><tr><th>Peer</th><th>OS</th><th>CPU</th><th>RAM shared</th><th>SSD shared</th>
+  <th>Role</th><th>Direct</th><th>RTT</th><th>Busy</th><th>RPC addr</th><th>Models</th></tr></thead>
+  <tbody id="nodes"></tbody></table>
+
+  <h2>Chat</h2>
+  <div class="card">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <select id="cmodel" style="padding:8px;border:1px solid #d1d5db;border-radius:8px"></select>
+      <input id="ckey" type="password" placeholder="API key (required)"
+             style="padding:8px;border:1px solid #d1d5db;border-radius:8px;min-width:220px">
+    </div>
+    <div id="clog" style="min-height:120px;max-height:320px;overflow-y:auto;border:1px solid #eef0f3;
+         border-radius:8px;padding:10px;margin-bottom:10px;background:#fafbfc"></div>
+    <div style="display:flex;gap:8px">
+      <input id="cinput" placeholder="Ask the network…" style="flex:1;padding:10px;
+             border:1px solid #d1d5db;border-radius:8px">
+      <button id="csend" style="padding:10px 20px;background:var(--acc);color:#fff;border:0;
+             border-radius:8px;font-weight:600;cursor:pointer">Send</button>
+    </div>
+    <p class="ref" style="margin:8px 0 0">Runs on volunteer nodes via the live API.
+    Create a key with <span class="mono">POST /v1/accounts</span> — spending deducts real credits.</p>
+  </div>
+
+  <p class="foot">All numbers are live measurements from node heartbeats &mdash; nothing is mocked.
+  <span class="ref" id="upd"></span></p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const gb = n => (n/1e9).toFixed(1)+' GB';
+const short = s => s ? s.slice(0,12)+'…' : '—';
+const pill = (txt, cls) => `<span class="pill ${cls}">${txt}</span>`;
+
+async function jget(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(path+' → '+r.status);
+  return r.json();
+}
+
+async function refresh() {
+  try {
+    const [net, quest, repl, metrics, models] = await Promise.all([
+      jget('/network/status'), jget('/v1/quest'), jget('/v1/replicas'),
+      jget('/v1/metrics'), jget('/v1/models'),
+    ]);
+    $('err').style.display = 'none';
+
+    $('net').innerHTML = [
+      [net.online_nodes, 'online nodes'], [net.compute_nodes, 'compute nodes (request routing)'],
+      [net.rpc_workers||0, 'RPC workers (joint compute)'],
+      [net.cpu_cores, 'shared CPU cores'], [gb(net.ram_bytes||0), 'shared RAM'],
+      [gb(net.ssd_bytes||0), 'shared SSD'], [net.gpu_nodes||0, 'GPU nodes'],
+      [gb(net.vram_bytes||0), 'shared VRAM'],
+    ].map(([v,l]) => `<div class="card"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+    // GPU models breakdown
+    const gm = net.gpu_models || {};
+    const gmHtml = Object.entries(gm).map(([m,c]) => `${m} ×${c}`).join(', ') || 'none';
+    $('net').innerHTML += `<div class="card"><div class="v" style="font-size:14px">${gmHtml}</div><div class="l">GPU models</div></div>`;
+
+    $('quest').innerHTML = quest.ladder.map(e => {
+      const cls = e.state==='ACTIVE' ? 'p-active' : e.state==='ELIGIBLE' ? 'p-eligible' : 'p-locked';
+      const pct = Math.round(e.progress*100);
+      return `<tr><td class="mono">${e.model_id}</td><td>${pill(e.state, cls)}</td>`+
+        `<td><div class="bar"><div style="width:${pct}%"></div></div></td><td>${pct}%</td></tr>`;
+    }).join('');
+
+    const dem = Object.fromEntries((metrics.models||[]).map(m => [m.model_id, m]));
+    const mstat = Object.fromEntries((models.data||[]).map(m => [m.id, m.status]));
+    $('models').innerHTML = repl.models.map(m => {
+      const d = dem[m.model_id] || {requests_total:0, rps_5m:0};
+      return `<tr><td class="mono">${m.model_id}</td><td>${pill(mstat[m.model_id]||'—','p-locked')}</td>`+
+        `<td>${m.holders}</td><td>${m.desired}</td>`+
+        `<td>${pill(m.healthy?'healthy':'converging', m.healthy?'p-healthy':'p-unhealthy')}</td>`+
+        `<td>${d.requests_total}</td><td>${d.rps_5m.toFixed(3)}</td></tr>`;
+    }).join('');
+
+    $('nodes').innerHTML = (net.nodes||[]).map(n => {
+      const role = n.rpc_addr ? 'RPC worker' : (n.direct_ok ? 'compute' : 'storage');
+      const roleCls = n.rpc_addr ? 'p-eligible' : (n.direct_ok ? 'p-active' : 'p-locked');
+      return `<tr><td class="mono">${short(n.id)}</td><td>${n.os||'—'}</td><td>${n.cpu_cores}</td>`+
+      `<td>${gb(n.ram_bytes||0)}</td><td>${gb(n.ssd_shared_bytes||0)}</td>`+
+      `<td>${pill(role, roleCls)}</td>`+
+      `<td>${n.direct_ok ? pill('yes','p-active') : pill('no','p-locked')}</td>`+
+      `<td>${n.rtt_ms||0} ms</td><td>${n.in_flight||0}</td>`+
+      `<td class="mono">${n.rpc_addr||'—'}</td>`+
+      `<td class="mono">${(n.models||[]).map(short).join(', ')||'—'}</td></tr>`;
+    }).join('') || `<tr><td colspan="10" style="color:var(--mut)">no nodes online</td></tr>`;
+
+    $('upd').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    const el = $('err');
+    el.style.display = 'block';
+    el.textContent = 'Failed to load network data: ' + e.message;
+  }
+}
+
+jget('/v1/version').then(v => { $('ver').textContent = 'v' + v.version; }).catch(()=>{});
+refresh();
+setInterval(refresh, 10000);
+
+// --- Chat ---
+const clog = $('clog');
+function chatLine(role, text) {
+  const d = document.createElement('div');
+  d.style.margin = '6px 0';
+  d.innerHTML = `<b>${role}:</b> `;
+  d.appendChild(document.createTextNode(text));
+  clog.appendChild(d);
+  clog.scrollTop = clog.scrollHeight;
+}
+async function loadModels() {
+  try {
+    const m = await jget('/v1/models');
+    $('cmodel').innerHTML = (m.data||[]).map(x =>
+      `<option value="${x.id}">${x.id} (${x.status})</option>`).join('');
+  } catch(e) { /* models load on next refresh */ }
+}
+async function sendChat() {
+  const input = $('cinput'), btn = $('csend');
+  const text = input.value.trim();
+  if (!text || btn.disabled) return;
+  input.value = '';
+  btn.disabled = true;
+  chatLine('you', text);
+  chatLine('…', 'thinking');
+  try {
+    const body = { model: $('cmodel').value,
+      messages: [{role:'user', content:text}], max_tokens: 256 };
+    const key = $('ckey').value.trim();
+    if (!key) { clog.removeChild(clog.lastChild); chatLine('error', 'API key required'); btn.disabled = false; return; }
+    const r = await fetch('/v1/chat/completions', {
+      method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+key},
+      body: JSON.stringify(body) });
+    const d = await r.json();
+    clog.removeChild(clog.lastChild);
+    if (!r.ok) {
+      chatLine('error', (d.error && d.error.message) || ('HTTP '+r.status));
+    } else {
+      const usage = d.usage || {};
+      chatLine('ai', d.choices[0].message.content +
+        `  [${usage.total_tokens||'?'} tokens]`);
+    }
+  } catch(e) {
+    clog.removeChild(clog.lastChild);
+    chatLine('error', e.message);
+  }
+  btn.disabled = false;
+}
+$('csend').onclick = sendChat;
+$('cinput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+loadModels();
+</script>
+</body>
+</html>
