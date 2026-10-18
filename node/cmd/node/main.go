@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -98,8 +99,11 @@ func main() {
 	ramShare := flag.Int("ram", 10, "RAM share percent")
 	storageShare := flag.Int("storage", 10, "storage share percent")
 	p2pPort := flag.Int("p2p-port", 4001, "libp2p listen port")
-	rpcPort := flag.Int("rpc-port", 0, "run as RPC worker on this port (0 = disabled); needs RPC_BIN and a model")
+	rpcPort := flag.Int("rpc-port", 0, "run as RPC worker on this port (0 = disabled); needs RPC_BIN")
+	rpcBind := flag.String("rpc-bind", "127.0.0.1", "RPC worker bind address (127.0.0.1 = localhost only, 0.0.0.0 = all interfaces)")
 	rpcAnnounce := flag.String("rpc-announce", "", "address to advertise for RPC (default: auto-detected outbound IP)")
+	rpcStandalone := flag.Bool("rpc-standalone", false, "run ONLY as RPC worker (no local inference engine); for external workers joining via tunnel")
+	rpcModels := flag.String("rpc-models", "", "comma-separated model IDs this RPC worker holds (file must exist as proof; worker does not load them)")
 	claimOnly := flag.Bool("claim", false, "prove peer-ID ownership to the service and print an API key for the node's earnings account, then exit")
 
 	// Fast --help/--version exit with status 0, before flag.Parse().
@@ -253,6 +257,57 @@ func main() {
 		recvByPeer = make(map[string]int64)
 		return out
 	}
+	// Standalone RPC worker mode: run ONLY ggml-rpc-server, no local engine.
+	// For external workers (e.g. Mac behind NAT) joining via SSH tunnel.
+	// The worker still needs the model FILE as proof of materialization
+	// (checked by the service via RpcAddr registration), but does not
+	// load it — the coordinator ships tensors at runtime.
+	if *rpcStandalone {
+		if *rpcPort <= 0 {
+			log.Fatal("--rpc-standalone requires --rpc-port > 0")
+		}
+		rpcBin := os.Getenv("RPC_BIN")
+		if rpcBin == "" {
+			log.Fatal("--rpc-standalone requires RPC_BIN env (ggml-rpc-server binary)")
+		}
+		rw := rpcworker.New(rpcBin, *rpcBind, *rpcPort)
+		fmt.Println("Starting standalone RPC worker:", rpcBin, "on", *rpcBind, "port", *rpcPort)
+		if err := rw.Start(ctx); err != nil {
+			log.Fatalf("rpc worker failed: %v", err)
+		}
+		defer rw.Stop()
+		announce := *rpcAnnounce
+		if announce == "" {
+			announce = *rpcBind
+		}
+		rpcMu.Lock()
+		rpcAddr = fmt.Sprintf("%s:%d", announce, *rpcPort)
+		rpcMu.Unlock()
+		fmt.Println("Standalone RPC worker ready, advertising:", rpcAddr)
+		// Register held models (file existence = proof of materialization).
+		// The worker does NOT load these; the coordinator ships tensors.
+		if *rpcModels != "" {
+			home, _ := os.UserHomeDir()
+			modelsDir := filepath.Join(home, ".distributed-ai-node", "models")
+			for _, mid := range strings.Split(*rpcModels, ",") {
+				mid = strings.TrimSpace(mid)
+				if mid == "" {
+					continue
+				}
+				// Verify the file exists (proof requirement).
+				matches, _ := filepath.Glob(filepath.Join(modelsDir, mid+"*"))
+				if len(matches) == 0 {
+					log.Fatalf("RPC worker claims model %q but no file found in %s", mid, modelsDir)
+				}
+				libMu.Lock()
+				modelFiles[mid] = matches[0]
+				libMu.Unlock()
+				fmt.Println("RPC worker holds model:", mid, "->", matches[0])
+			}
+		}
+		// Fall through to registration/heartbeat below (apiURL branch
+		// handles the --api case; P2P --connect works independently).
+	}
 	if bin := os.Getenv("ENGINE_BIN"); bin != "" {
 		modelID := os.Getenv("MODEL_ID")
 		if modelID == "" {
@@ -295,10 +350,12 @@ func main() {
 			engineMu.Unlock()
 			defer mgr.Stop()
 			// RPC worker: jointly compute with a coordinator.
+			// Binds to --rpc-bind (default 127.0.0.1); use 0.0.0.0 only
+			// with explicit intent (never expose unauthenticated RPC to internet).
 			if *rpcPort > 0 {
 				rpcBin := os.Getenv("RPC_BIN")
-				rw := rpcworker.New(rpcBin, "0.0.0.0", *rpcPort)
-				fmt.Println("Starting RPC worker:", rpcBin, "port", *rpcPort)
+				rw := rpcworker.New(rpcBin, *rpcBind, *rpcPort)
+				fmt.Println("Starting RPC worker:", rpcBin, "on", *rpcBind, "port", *rpcPort)
 				if err := rw.Start(ctx); err != nil {
 					log.Fatalf("rpc worker failed: %v", err)
 				}
@@ -323,7 +380,7 @@ func main() {
 			libMu.Unlock()
 			h.SetStreamHandler(jobprotocol.JobProtocol, executor.New(mgr, modelID, engineCfg(modelPath)).HandleStream)
 			fmt.Println("Job executor ready, serving model:", modelID)
-		} else if *apiURL != "" {
+		} else if *apiURL != "" && !*rpcStandalone {
 			home, _ := os.UserHomeDir()
 			modelsDir := filepath.Join(home, ".distributed-ai-node", "models")
 			ex := executor.NewLazy(executor.LazyConfig{
