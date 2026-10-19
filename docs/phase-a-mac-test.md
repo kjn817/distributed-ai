@@ -7,9 +7,11 @@ HTTP 등록만으로는 부족 — **libp2p P2P 연결과 자원 정보 교환**
 
 ## 전제 조건
 
-- Oracle: v0.10-alpha 실행 중 (dain-svc + dain-node)
-- Mac: M3 Apple Silicon, dain-node-darwin-arm64 바이너리 있음
-- Mac에서 Oracle로 SSH 접속 가능
+- Oracle: v0.10-alpha 실행 중 (dain-svc + dain-node) — 변경 없음
+- Mac: M3 Apple Silicon, **v0.10-alpha dain-node-darwin-arm64** 바이너리
+  (릴리스에서 다운로드, 새 빌드 불필요 — Phase A에 필요한 플래그 전부 포함)
+- Mac에서 Oracle SSH **22번 포트** 접속 가능 (터널용, 방화벽에서 허용 필요)
+- Mac에 llama.cpp 엔진 빌드 **불필요** (Phase A는 등록+P2P만)
 
 ## 1단계: SSH 터널 설정 (Mac에서)
 
@@ -45,20 +47,22 @@ curl http://127.0.0.1:8080/network/status | python3 -c \
 ## 3단계: Mac Node 실행 (안전 모드)
 
 ```bash
-# 안전 모드: --cpu 0 --ram 0
-# → ComputeNodes에서 제외되어 연산 작업이 할당되지 않음
+# 안전 모드: --cpu 0 --ram 0 --storage 0
+# → ComputeNodes에서 제외되어 연산 작업이 할당되지 않음 (v0.10-alpha 확인)
 # → 등록·하트비트·P2P 통신만 수행
 # → macOS는 OS 수준 자원 제한이 불가능하므로 강제되는 것처럼 표시하지 않음
+# → 실제 자원 제공은 연결 성공 후 별도 승인 필요
 
 ./dain-node-darwin-arm64 \
   --api http://127.0.0.1:8080 \
-  --cpu 0 --ram 0 --storage 10 \
+  --cpu 0 --ram 0 --storage 0 \
   --p2p-port 4002 \
   --connect /ip4/127.0.0.1/tcp/14001/p2p/<oracle-peer-id>
 ```
 
 **플래그 설명:**
-- `--cpu 0 --ram 0`: 연산 자원 미제공 (안전 모드). 스케줄러가 이 노드에 추론 작업을 보내지 않음.
+- `--cpu 0 --ram 0 --storage 0`: 자원 미제공 (안전 모드). 스케줄러가 이 노드에 추론 작업을 보내지 않음.
+  v0.10-alpha의 `ComputeNodes()`가 `CPUCores <= 0`을 제외함을 확인.
 - `--p2p-port 4002`: Mac Node 리슨 포트 (기본 4001과 분리).
 - `--connect /ip4/127.0.0.1/tcp/14001/...`: SSH 터널(로컬 14001 → Oracle 4001)을 통한 Oracle libp2p 연결.
 
