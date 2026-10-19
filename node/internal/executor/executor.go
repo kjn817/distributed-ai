@@ -31,6 +31,7 @@ type Executor struct {
 	mgr         *engine.Manager
 	modelID     string
 	rpcBackends []string
+	rpcNgl      int
 	// engineCfg is set for preplaced mode (New); allows restart with
 	// different RPC backends for joint compute.
 	engineCfg *engine.Config
@@ -109,7 +110,7 @@ func (e *Executor) execute(ctx context.Context, req *protocol.JobRequest) protoc
 	// The coordinator runs llama-server with --rpc backends; workers run
 	// rpc-server (see --rpc-worker). Distinct from request routing, which
 	// sends different requests to different nodes.
-	mgr, err := e.ensureModel(ctx, req.ModelID, req.RpcBackends)
+	mgr, err := e.ensureModel(ctx, req.ModelID, req.RpcBackends, req.RpcNgl)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -161,9 +162,14 @@ func (e *Executor) execute(ctx context.Context, req *protocol.JobRequest) protoc
 // ensureModel returns a ready engine for modelID, materializing it over P2P
 // first when lazy mode is armed. The slow download happens without holding
 // the lock; the manager swap is atomic under it.
-func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends []string) (*engine.Manager, error) {
+// rpcNgl: layers to offload to RPC workers (0 = default 99, full offload).
+func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends []string, rpcNgl int) (*engine.Manager, error) {
+	ngl := rpcNgl
+	if ngl <= 0 {
+		ngl = 99 // default: full offload for verification
+	}
 	e.mu.Lock()
-	if e.mgr != nil && e.modelID == modelID && e.mgr.Ready() && equalStrings(e.rpcBackends, rpcBackends) {
+	if e.mgr != nil && e.modelID == modelID && e.mgr.Ready() && equalStrings(e.rpcBackends, rpcBackends) && e.rpcNgl == ngl {
 		mgr := e.mgr
 		e.mu.Unlock()
 		return mgr, nil
@@ -181,7 +187,9 @@ func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends 
 		}
 		cfg := *engCfg
 		if len(rpcBackends) > 0 {
-			cfg.ExtraArgs = []string{"--rpc", strings.Join(rpcBackends, ",")}
+			// Joint compute: --rpc registers backends, -ngl offloads layers.
+			// Without -ngl, all layers stay on coordinator CPU (false success).
+			cfg.ExtraArgs = []string{"--rpc", strings.Join(rpcBackends, ","), "--n-gpu-layers", fmt.Sprint(ngl)}
 		} else {
 			cfg.ExtraArgs = nil
 		}
@@ -191,6 +199,7 @@ func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends 
 		}
 		e.mgr = mgr
 		e.rpcBackends = rpcBackends
+		e.rpcNgl = ngl
 		return mgr, nil
 	}
 
@@ -222,7 +231,8 @@ func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends 
 	}
 	if len(rpcBackends) > 0 {
 		// Joint compute: offload layers to rpc-server workers.
-		cfg.ExtraArgs = []string{"--rpc", strings.Join(rpcBackends, ",")}
+		// --n-gpu-layers is required; without it all layers stay local.
+		cfg.ExtraArgs = []string{"--rpc", strings.Join(rpcBackends, ","), "--n-gpu-layers", fmt.Sprint(ngl)}
 	}
 	mgr := engine.New(cfg)
 	if err := mgr.Start(ctx); err != nil {
@@ -230,6 +240,7 @@ func (e *Executor) ensureModel(ctx context.Context, modelID string, rpcBackends 
 	}
 	e.mgr = mgr
 	e.rpcBackends = rpcBackends
+	e.rpcNgl = ngl
 	e.modelID = modelID
 	if lazy.OnModelReady != nil {
 		go lazy.OnModelReady(modelID, path)
