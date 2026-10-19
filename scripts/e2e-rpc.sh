@@ -1,9 +1,16 @@
 #!/bin/bash
-# Phase 2 RPC e2e: two nodes jointly compute ONE request.
+# Phase 2 RPC e2e: RPC protocol and placement verification.
+# *** CORRECTION (2026-10-19) ***: This test was previously labeled
+# "jointly compute ONE request" but the coordinator ran WITHOUT -ngl,
+# so all layers computed on local CPU. This verifies RPC protocol,
+# worker registration, placement, and credit flow — NOT joint compute.
+# Status: 공동 계산 미검증 (프로토콜·배관만 검증).
+# True joint-compute verification requires the -ngl fix (executor.go)
+# and is covered by docs/phase-b-proof.md.
+#
 # *** LOCAL INTEGRATION TEST *** Both workers run on the SAME machine
-# (127.0.0.1). This verifies the RPC protocol, placement, and joint-compute
-# path — NOT network traversal. Remote multi-machine verification is a
-# separate milestone (requires 2+ physical hosts).
+# (127.0.0.1). NOT network traversal. Remote multi-machine verification
+# is a separate milestone (requires 2+ physical hosts).
 # Prerequisites: service with TEST_FUND, two worker nodes with --rpc-port.
 set -e
 API_KEY="testkey123456789"
