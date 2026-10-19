@@ -25,6 +25,11 @@ type JobRequest struct {
 	// When non-empty, the executor starts llama-server with --rpc backends
 	// (one request computed jointly by coordinator + workers).
 	RpcBackends []string `json:"rpc_backends,omitempty"`
+	// RpcNgl is the number of layers to offload to RPC workers (-ngl).
+	// 0 = default (99, full offload). Use smaller values (e.g. 8, 12) to
+	// keep some layers on the coordinator CPU for hybrid experiments.
+	// The exact layer placement is verified via llama-server logs.
+	RpcNgl int `json:"rpc_ngl,omitempty"`
 }
 
 // ChatMessage is one OpenAI-style chat message.
