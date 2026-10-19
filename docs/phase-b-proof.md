@@ -30,7 +30,7 @@ Oracle(coordinator) + Mac(RPC worker)이 **하나의 추론 요청을 실제로 
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 ubuntu@<oracle-ip> -N -f   # API (HTTP 등록·요청용)
-ssh -L 4001:127.0.0.1:4001 ubuntu@<oracle-ip> -N -f   # P2P (Phase A와 동일)
+ssh -L 14001:127.0.0.1:4001 ubuntu@<oracle-ip> -N -f   # P2P (Phase A와 동일)
 ssh -R 50052:127.0.0.1:50052 ubuntu@<oracle-ip> -N -f # RPC 역터널 (핵심)
 
 # 역터널 확인 (Oracle에서): 127.0.0.1:50052가 LISTEN이어야 함
@@ -51,7 +51,7 @@ export RPC_BIN=$HOME/<llama.cpp-build>/bin/rpc-server   # 실제 바이너리 �
   --api http://127.0.0.1:8080 \
   --cpu 0 --ram 0 --storage 10 \
   --p2p-port 4002 \
-  --connect /ip4/127.0.0.1/tcp/4001/p2p/<oracle-peer-id> \
+  --connect /ip4/127.0.0.1/tcp/14001/p2p/<oracle-peer-id> \
   --rpc-standalone --rpc-port 50052 --rpc-bind 127.0.0.1 \
   --rpc-models qwen2.5-0.5b-q4 \
   > mac-phase-b.log 2>&1 &
