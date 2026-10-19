@@ -85,8 +85,8 @@ curl http://127.0.0.1:8080/network/status | python3 -m json.tool
 
 **Mac 로그에서 확인:**
 ```
-Connecting to: /ip4/127.0.0.1/tcp/4001/p2p/<peer-id>
-# 성공 시 에러 없이 다음 단계로 진행
+Connecting to: /ip4/127.0.0.1/tcp/14001/p2p/<peer-id>
+# 성공 시 에러 없이 다음 단계로 진행 (14001 = SSH 터널 로컬 포트)
 ```
 
 **Oracle 로그에서 확인 (핵심 증거):**
@@ -155,8 +155,8 @@ Oracle 로그에서 `ChunkProtocol` 스트림 처리 확인.
 
 ### P2P 연결 실패
 ```bash
-# 터널 확인
-ssh -v -L 4001:127.0.0.1:4001 ubuntu@<oracle-ip> -N
+# 터널 확인 (Phase A 1단계와 동일한 14001 터널)
+ssh -v -L 14001:127.0.0.1:4001 ubuntu@<oracle-ip> -N
 # Oracle에서 4001 리스닝 확인
 ss -tlnp | grep 4001
 ```
