@@ -18,10 +18,12 @@ HTTP 등록만으로는 부족 — **libp2p P2P 연결과 자원 정보 교환**
 ssh -L 8080:127.0.0.1:8080 ubuntu@<oracle-ip> -N -f
 
 # P2P 터널 (libp2p 연결용) — 4001 포트를 열지 않고 터널로 검증
-ssh -L 4001:127.0.0.1:4001 ubuntu@<oracle-ip> -N -f
+# 주의: Mac 로컬 4001은 터널이 사용하므로, Mac Node는 4002로 리슨
+# 터널용 로컬 포트는 14001로 분리 (Mac Node 기본 포트와 충돌 방지)
+ssh -L 14001:127.0.0.1:4001 ubuntu@<oracle-ip> -N -f
 
 # 터널 확인
-lsof -i :8080 -i :4001 | grep LISTEN
+lsof -i :8080 -i :14001 | grep LISTEN
 ```
 
 **왜 터널인가:** Oracle 방화벽에 4001을 열지 않고도 P2P를 검증할 수 있음.
@@ -52,13 +54,21 @@ curl http://127.0.0.1:8080/network/status | python3 -c \
   --api http://127.0.0.1:8080 \
   --cpu 0 --ram 0 --storage 10 \
   --p2p-port 4002 \
-  --connect /ip4/127.0.0.1/tcp/4001/p2p/<oracle-peer-id>
+  --connect /ip4/127.0.0.1/tcp/14001/p2p/<oracle-peer-id>
 ```
 
 **플래그 설명:**
 - `--cpu 0 --ram 0`: 연산 자원 미제공 (안전 모드). 스케줄러가 이 노드에 추론 작업을 보내지 않음.
-- `--p2p-port 4002`: Mac 로컬 4001이 SSH 터널용으로 사용 중이므로 4002 사용 (충돌 방지).
-- `--connect`: SSH 터널을 통한 Oracle libp2p 연결.
+- `--p2p-port 4002`: Mac Node 리슨 포트 (기본 4001과 분리).
+- `--connect /ip4/127.0.0.1/tcp/14001/...`: SSH 터널(로컬 14001 → Oracle 4001)을 통한 Oracle libp2p 연결.
+
+**포트 정리:**
+| 용도 | 포트 | 설명 |
+|------|------|------|
+| Mac SSH 터널 (P2P) | 14001 | 로컬 → Oracle 4001 |
+| Mac Node P2P 리슨 | 4002 | Mac 자체 libp2p |
+| Oracle P2P 리슨 | 4001 | Oracle 자체 libp2p (터널 목적지) |
+| Mac SSH 터널 (API) | 8080 | 로컬 → Oracle 8080 |
 
 ## 4단계: 성공 기준 확인
 
