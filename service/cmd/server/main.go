@@ -17,13 +17,15 @@ import (
 	"distributed-ai/service/internal/api"
 	"distributed-ai/service/internal/credit"
 	"distributed-ai/service/internal/p2pnet"
+	"distributed-ai/service/internal/placement"
 	"distributed-ai/service/internal/quest"
 	"distributed-ai/service/internal/registry"
 	"distributed-ai/service/internal/replica"
 )
 
 // version is overridden at release build time:
-//   go build -ldflags "-X main.version=v0.9-alpha" ./service/cmd/server
+//
+//	go build -ldflags "-X main.version=v0.9-alpha" ./service/cmd/server
 var version = "dev"
 
 func main() {
@@ -50,6 +52,10 @@ Environment:
   ENGINE_CTX_SIZE    engine context size override (low-memory boxes)
   TEST_FUND          alpha testing account funding
   FOUNDER_ACCOUNT / FOUNDER_SHARE_ENABLED
+  ADMISSION_SHADOW=1 record Adaptive Compute Admission decisions in
+                     shadow mode (observational only; placement unchanged).
+                     ADMISSION_MIN_SAVING_PCT tunes the candidate threshold
+                     (default 10).
 `)
 			os.Exit(0)
 		case "--version":
@@ -64,6 +70,20 @@ Environment:
 	}
 	reg := registry.New()
 	srv := api.New(reg)
+
+	// Adaptive Compute Admission, shadow mode: OFF by default. When
+	// enabled, decisions are recorded after placement for later analysis;
+	// placement itself is never influenced (see placement.DecideAdmission).
+	if os.Getenv("ADMISSION_SHADOW") == "1" {
+		minSaving := 10.0
+		if v := os.Getenv("ADMISSION_MIN_SAVING_PCT"); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				minSaving = f
+			}
+		}
+		srv.WithAdmissionShadow(placement.NewShadowRecorder(128), minSaving)
+		log.Printf("admission shadow mode ON (min saving %.1f%%) — recording only, placement unchanged", minSaving)
+	}
 
 	// Model manifests: MODELS_DIR (default ../models relative to service/).
 	// Only size+SHA-256-verified files become ACTIVE.

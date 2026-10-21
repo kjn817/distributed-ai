@@ -1,0 +1,213 @@
+DAIN experiment/adaptive-inference — test evidence (2026-10-21, local VM)
+Base: GitHub main 8d2333a6dcc3a610c6f12dd915143176c89e1433
+
+=== go build ./... ===
+BUILD_OK
+
+=== go vet ./... ===
+VET_OK
+
+=== go test ./... ===
+ok  	distributed-ai/engine	0.099s
+ok  	distributed-ai/experiments/progressive	(cached)
+?   	distributed-ai/experiments/progressive/cmd/progressive-demo	[no test files]
+ok  	distributed-ai/limits	(cached)
+?   	distributed-ai/node/cmd/node	[no test files]
+ok  	distributed-ai/node/internal/chunks	(cached)
+ok  	distributed-ai/node/internal/executor	(cached)
+ok  	distributed-ai/node/internal/hardware	(cached)
+ok  	distributed-ai/node/internal/identity	(cached)
+ok  	distributed-ai/node/internal/materialize	0.064s
+ok  	distributed-ai/node/internal/p2p	(cached)
+ok  	distributed-ai/node/internal/protocol	(cached)
+ok  	distributed-ai/node/internal/reporter	1.273s
+?   	distributed-ai/node/internal/rpcworker	[no test files]
+?   	distributed-ai/protocol	[no test files]
+?   	distributed-ai/service/cmd/chunk-model	[no test files]
+?   	distributed-ai/service/cmd/server	[no test files]
+ok  	distributed-ai/service/internal/api	0.017s
+ok  	distributed-ai/service/internal/credit	(cached)
+?   	distributed-ai/service/internal/dashboard	[no test files]
+ok  	distributed-ai/service/internal/dispatch	0.204s
+ok  	distributed-ai/service/internal/metrics	(cached)
+ok  	distributed-ai/service/internal/model	(cached)
+ok  	distributed-ai/service/internal/p2pnet	(cached)
+ok  	distributed-ai/service/internal/placement	(cached)
+ok  	distributed-ai/service/internal/quest	(cached)
+ok  	distributed-ai/service/internal/registry	(cached)
+ok  	distributed-ai/service/internal/replica	(cached)
+
+=== verbose: new/changed packages ===
+=== RUN   TestAdmissionJointCandidate
+--- PASS: TestAdmissionJointCandidate (0.00s)
+=== RUN   TestAdmissionSingleWhenJointSlower
+--- PASS: TestAdmissionSingleWhenJointSlower (0.00s)
+=== RUN   TestAdmissionThresholdBoundary
+--- PASS: TestAdmissionThresholdBoundary (0.00s)
+=== RUN   TestAdmissionUnmeasuredNeverPredicts
+--- PASS: TestAdmissionUnmeasuredNeverPredicts (0.00s)
+=== RUN   TestAdmissionInvalidMeasuredValues
+--- PASS: TestAdmissionInvalidMeasuredValues (0.00s)
+=== RUN   TestAdmissionInvalidThreshold
+--- PASS: TestAdmissionInvalidThreshold (0.00s)
+=== RUN   TestAdmissionEachGateClosedMeansSingle
+--- PASS: TestAdmissionEachGateClosedMeansSingle (0.00s)
+=== RUN   TestInputsFromRegistryHonestDefaults
+--- PASS: TestInputsFromRegistryHonestDefaults (0.00s)
+=== RUN   TestInputsFromRegistryNoNode
+--- PASS: TestInputsFromRegistryNoNode (0.00s)
+=== RUN   TestShadowRecorderBoundsAndCopies
+--- PASS: TestShadowRecorderBoundsAndCopies (0.00s)
+=== RUN   TestDistributedGroup
+--- PASS: TestDistributedGroup (0.00s)
+=== RUN   TestDistributedGroupNoWorkers
+--- PASS: TestDistributedGroupNoWorkers (0.00s)
+=== RUN   TestRemoteFirst
+--- PASS: TestRemoteFirst (0.00s)
+=== RUN   TestLocalFallback
+--- PASS: TestLocalFallback (0.00s)
+=== RUN   TestNoCapacity
+--- PASS: TestNoCapacity (0.00s)
+=== RUN   TestDistributedStrategyUnsupported
+--- PASS: TestDistributedStrategyUnsupported (0.00s)
+=== RUN   TestRTTBreaksTies
+--- PASS: TestRTTBreaksTies (0.00s)
+=== RUN   TestStaleHeartbeatPenalized
+--- PASS: TestStaleHeartbeatPenalized (0.00s)
+=== RUN   TestInFlightSpreadsLoad
+--- PASS: TestInFlightSpreadsLoad (0.00s)
+PASS
+ok  	distributed-ai/service/internal/placement	0.008s
+=== RUN   TestAdmissionShadowOffByDefault
+--- PASS: TestAdmissionShadowOffByDefault (0.00s)
+=== RUN   TestAdmissionShadowRecordsWithoutChangingRouting
+--- PASS: TestAdmissionShadowRecordsWithoutChangingRouting (0.01s)
+=== RUN   TestAdmissionShadowSkipsUnplacedRequests
+--- PASS: TestAdmissionShadowSkipsUnplacedRequests (0.00s)
+=== RUN   TestChatCompletionsNoEngine
+--- PASS: TestChatCompletionsNoEngine (0.00s)
+=== RUN   TestChatCompletionsProxied
+--- PASS: TestChatCompletionsProxied (0.00s)
+=== RUN   TestChatCompletionsEngineNotReady
+--- PASS: TestChatCompletionsEngineNotReady (0.00s)
+=== RUN   TestNodeLifecycle
+--- PASS: TestNodeLifecycle (0.00s)
+PASS
+ok  	distributed-ai/service/internal/api	0.042s
+=== RUN   TestParseAndExtractFixture
+--- PASS: TestParseAndExtractFixture (0.00s)
+=== RUN   TestGGUFErrors
+--- PASS: TestGGUFErrors (0.00s)
+=== RUN   TestRealModelGGUF
+--- PASS: TestRealModelGGUF (2.33s)
+=== RUN   TestFloat16RoundTripKnownValues
+--- PASS: TestFloat16RoundTripKnownValues (0.00s)
+=== RUN   TestQuantizeSymmetricBoundHolds
+--- PASS: TestQuantizeSymmetricBoundHolds (0.00s)
+=== RUN   TestQuantizePayloadBytes
+--- PASS: TestQuantizePayloadBytes (0.00s)
+=== RUN   TestQuantizeBoundaries
+--- PASS: TestQuantizeBoundaries (0.00s)
+=== RUN   TestCertifyClearMargin
+--- PASS: TestCertifyClearMargin (0.00s)
+=== RUN   TestCertifyTightMarginNotCertified
+--- PASS: TestCertifyTightMarginNotCertified (0.00s)
+=== RUN   TestCertifyDimensionErrors
+--- PASS: TestCertifyDimensionErrors (0.00s)
+=== RUN   TestCertificateSoundnessProperty
+--- PASS: TestCertificateSoundnessProperty (0.00s)
+=== RUN   TestReportHonestyFields
+--- PASS: TestReportHonestyFields (0.00s)
+
+=== demo: synthetic ===
+{
+  "experiment": "certified activation quantization — single affine layer",
+  "guarantee_scope": "single_affine_layer_only",
+  "transformer_wide_guarantee": false,
+  "data_source": "synthetic Gaussian weights (seeded) — not a real model",
+  "activation_source": "synthetic Gaussian activations (seeded)",
+  "samples": 200,
+  "width": 32,
+  "classes": 16,
+  "results": [
+    {
+      "bits": 4,
+      "argmax_match_rate": 0.945,
+      "certified_rate": 0.14,
+      "compression_ratio": 6.4,
+      "activation_bytes": 20,
+      "mean_err_bound": 0.1655259264295389
+    },
+    {
+      "bits": 8,
+      "argmax_match_rate": 0.985,
+      "certified_rate": 0.91,
+      "compression_ratio": 3.5555555555555554,
+      "activation_bytes": 36,
+      "mean_err_bound": 0.009123476259895853
+    },
+    {
+      "bits": 16,
+      "argmax_match_rate": 1,
+      "certified_rate": 0.99,
+      "compression_ratio": 2,
+      "activation_bytes": 64,
+      "mean_err_bound": 0.000849609375
+    }
+  ],
+  "progressive_refinement_implemented": false,
+  "extra_bits_transmitted": 0,
+  "extra_rtt_cost_ms": null,
+  "notes": [
+    "INT4/INT8/FP16 are independent quantizations of the same vector, not stages of a progressive stream",
+    "progressive bitplane refinement is not implemented; no extra bits were transmitted and no extra RTT was measured",
+    "the certificate covers this one affine layer only; no claim is made about a full Transformer",
+    "compression ratio compares one activation vector against FP32 and includes the 4-byte scale (INT4/INT8)"
+  ]
+}
+=== demo: real GGUF weights (output.weight, Q8_0) ===
+{
+  "experiment": "certified activation quantization — single affine layer",
+  "guarantee_scope": "single_affine_layer_only",
+  "transformer_wide_guarantee": false,
+  "data_source": "real GGUF tensor \"output.weight\" (Q8_0) from models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+  "activation_source": "synthetic Gaussian activations (seeded) — no activation capture path exists yet",
+  "samples": 200,
+  "width": 896,
+  "classes": 128,
+  "results": [
+    {
+      "bits": 4,
+      "argmax_match_rate": 0.845,
+      "certified_rate": 0,
+      "compression_ratio": 7.929203539823009,
+      "activation_bytes": 452,
+      "mean_err_bound": 0.24490203241634298
+    },
+    {
+      "bits": 8,
+      "argmax_match_rate": 0.99,
+      "certified_rate": 0.315,
+      "compression_ratio": 3.982222222222222,
+      "activation_bytes": 900,
+      "mean_err_bound": 0.013498537219798417
+    },
+    {
+      "bits": 16,
+      "argmax_match_rate": 1,
+      "certified_rate": 0.915,
+      "compression_ratio": 2,
+      "activation_bytes": 1792,
+      "mean_err_bound": 0.00103515625
+    }
+  ],
+  "progressive_refinement_implemented": false,
+  "extra_bits_transmitted": 0,
+  "extra_rtt_cost_ms": null,
+  "notes": [
+    "INT4/INT8/FP16 are independent quantizations of the same vector, not stages of a progressive stream",
+    "progressive bitplane refinement is not implemented; no extra bits were transmitted and no extra RTT was measured",
+    "the certificate covers this one affine layer only; no claim is made about a full Transformer",
+    "compression ratio compares one activation vector against FP32 and includes the 4-byte scale (INT4/INT8)"
+  ]
+}

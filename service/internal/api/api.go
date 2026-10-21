@@ -48,6 +48,11 @@ type Server struct {
 	// (FOUNDER_SHARE_ENABLED=1).
 	founder      string
 	founderShare bool
+	// admissionShadow records Adaptive Compute Admission decisions in
+	// shadow mode. nil = OFF (default): no recording, no behavior change.
+	// Decisions are observational only and never influence placement.
+	admissionShadow       *placement.ShadowRecorder
+	admissionMinSavingPct float64
 }
 
 // New creates the API server.
@@ -89,6 +94,16 @@ func (s *Server) WithLedger(l credit.Ledger) *Server {
 	return s
 }
 
+// WithAdmissionShadow enables Adaptive Compute Admission in shadow mode:
+// after each successful placement the admission decision is computed from
+// registry-known measurements and recorded. It never changes which
+// assignment is used. Not calling this leaves the feature OFF.
+func (s *Server) WithAdmissionShadow(rec *placement.ShadowRecorder, minSavingPct float64) *Server {
+	s.admissionShadow = rec
+	s.admissionMinSavingPct = minSavingPct
+	return s
+}
+
 // Routes registers all handlers.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
@@ -110,6 +125,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/models/{id}/holders", s.handleModelHolders)
 	mux.HandleFunc("GET /v1/quest", s.handleQuest)
 	mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
+	mux.HandleFunc("GET /v1/experiments/admission/shadow", s.handleAdmissionShadow)
 	mux.HandleFunc("GET /v1/replicas", s.handleReplicas)
 	return mux
 }
@@ -255,6 +271,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	s.metrics.Record(req.Model)
 
+	// Adaptive Compute Admission — SHADOW MODE ONLY. The decision is
+	// recorded for later comparison with real outcomes; the assignment
+	// above is used exactly as before, whatever the decision says.
+	if s.admissionShadow != nil {
+		inputs := placement.InputsFromRegistry(s.reg,
+			placement.Request{ModelID: req.Model, Strategy: strategy}, tgt)
+		inputs.RequestID = fmt.Sprintf("chat-%d", time.Now().UnixNano())
+		s.admissionShadow.Record(placement.DecideAdmission(inputs, s.admissionMinSavingPct))
+	}
+
 	if tgt.Kind == "local" {
 		// Replay the already-read body into the proxy.
 		// Note: token usage isn't visible through the proxy, so the local
@@ -399,6 +425,22 @@ func (s *Server) handleReplicas(w http.ResponseWriter, r *http.Request) {
 // handleMetrics serves per-model demand stats (real served requests).
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"models": s.metrics.Snapshot()})
+}
+
+// handleAdmissionShadow serves the recorded shadow admission decisions.
+// When shadow mode is OFF (the default) the endpoint answers 404, exactly
+// as if the experiment did not exist.
+func (s *Server) handleAdmissionShadow(w http.ResponseWriter, r *http.Request) {
+	if s.admissionShadow == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "admission shadow mode is disabled"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":        true,
+		"shadow":         true,
+		"min_saving_pct": s.admissionMinSavingPct,
+		"decisions":      s.admissionShadow.Snapshot(),
+	})
 }
 
 // handleQuest serves the Model Quest ladder: per-model unlock state and
