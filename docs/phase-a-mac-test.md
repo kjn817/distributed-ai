@@ -13,6 +13,15 @@ HTTP 등록만으로는 부족 — **libp2p P2P 연결과 자원 정보 교환**
 - Mac에서 Oracle SSH **22번 포트** 접속 가능 (터널용, 방화벽에서 허용 필요)
 - Mac에 llama.cpp 엔진 빌드 **불필요** (Phase A는 등록+P2P만)
 
+## 0단계: 바이너리 다운로드 (Mac에서)
+
+```bash
+# v0.10-alpha 릴리스에서 다운로드 (새 빌드 불필요 — Phase A에 필요한 플래그 전부 포함)
+# 파일 크기: 약 34MB (2026-10-19 다운로드 확인됨)
+curl -sSL -o dain-node https://github.com/kjn817/distributed-ai/releases/download/v0.10-alpha/dain-node-darwin-arm64
+chmod +x dain-node
+```
+
 ## 1단계: SSH 터널 설정 (Mac에서)
 
 ```bash
@@ -53,7 +62,7 @@ curl http://127.0.0.1:8080/network/status | python3 -c \
 # → macOS는 OS 수준 자원 제한이 불가능하므로 강제되는 것처럼 표시하지 않음
 # → 실제 자원 제공은 연결 성공 후 별도 승인 필요
 
-./dain-node-darwin-arm64 \
+./dain-node \
   --api http://127.0.0.1:8080 \
   --cpu 0 --ram 0 --storage 0 \
   --p2p-port 4002 \
