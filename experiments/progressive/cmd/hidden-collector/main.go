@@ -1,25 +1,32 @@
-// Command hidden-collector collects REAL hidden activations from a
-// running llama-server for the certified-progressive experiment.
+// Command hidden-collector collects candidate hidden activations
+// from a running llama-server for the certified-progressive experiment.
 //
-// Method (no llama.cpp modification): the server's OpenAI-compatible
-// /v1/embeddings endpoint returns the model's pooled final hidden
-// state. For a prompt of exactly ONE token, pooling is the identity, so
-// the returned vector IS the final hidden state of that position —
-// i.e. the exact input that output.weight (the lm_head affine map)
-// consumes. The collector verifies the token count from the response
-// usage: prompts that tokenize to more than one token are REFUSED by
-// default (they would be pooled, a different object), and can only be
-// included with -allow-pooled, which labels the dataset accordingly.
+// Method (no llama.cpp modification): start a DEDICATED embedding
+// instance with
 //
-// The chat template is NOT applied (raw embeddings of the literal
-// text), and BOS handling is the server's; the dataset records the
-// endpoint and flags used so the run is reproducible.
+//	llama-server --embedding --pooling none --embd-normalize -1
+//
+// and use the native POST /embedding endpoint, which returns one
+// vector per token position (the OpenAI /v1/embeddings endpoint
+// rejects pooling=none). With normalization disabled these vectors are
+// the raw per-position outputs of the final norm — candidates for the
+// exact input of output.weight.
+//
+// Candidates are NOT hidden states until proven: this tool labels the
+// dataset hidden_candidate_unverified (or embedding_l2_normalized if
+// the norms come back ≈1, meaning the server normalized anyway).
+// cmd/hidden-verify performs the logit comparison that can promote a
+// dataset to an exact_hidden_* kind.
+//
+// For multi-token prompts the collector keeps the LAST position's
+// vector (position "last") — the hidden state that predicts the next
+// token in that context. Single-token prompts are position "single".
 //
 // Usage:
 //
 //	hidden-collector -engine-url http://127.0.0.1:18100 \
-//	  -prompts "The,Hello,Water,Fire,123,king,queen,Paris" \
-//	  -model qwen2.5-0.5b-instruct -out hidden.json
+//	  -prompts "Hello,The capital of France is" \
+//	  -model qwen2.5-0.5b-instruct -out hidden-candidates.json
 package main
 
 import (
@@ -27,6 +34,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -35,42 +43,47 @@ import (
 	"distributed-ai/experiments/progressive"
 )
 
+// native /embedding response: [{"index":0,"embedding":[[...], ...]}]
+// with one inner vector per token position.
 type embResponse struct {
-	Data []struct {
-		Embedding []float64 `json:"embedding"`
-	} `json:"data"`
-	Usage struct {
-		PromptTokens int `json:"prompt_tokens"`
-	} `json:"usage"`
+	Index     int         `json:"index"`
+	Embedding [][]float64 `json:"embedding"`
 }
 
-func fetchEmbedding(client *http.Client, url, text string) ([]float64, int, error) {
-	body, _ := json.Marshal(map[string]any{"input": text, "model": "default"})
-	resp, err := client.Post(url+"/v1/embeddings", "application/json", bytes.NewReader(body))
+func fetchTokens(client *http.Client, url, text string) ([][]float64, error) {
+	body, _ := json.Marshal(map[string]any{"content": text})
+	resp, err := client.Post(url+"/embedding", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, 0, fmt.Errorf("embeddings endpoint: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("embedding endpoint: HTTP %d (server must run --embedding --pooling none)", resp.StatusCode)
 	}
-	var er embResponse
-	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
-		return nil, 0, err
+	var arr []embResponse
+	if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
+		return nil, err
 	}
-	if len(er.Data) != 1 || len(er.Data[0].Embedding) == 0 {
-		return nil, 0, fmt.Errorf("unexpected embeddings payload shape")
+	if len(arr) != 1 || len(arr[0].Embedding) == 0 {
+		return nil, fmt.Errorf("unexpected /embedding payload shape")
 	}
-	return er.Data[0].Embedding, er.Usage.PromptTokens, nil
+	return arr[0].Embedding, nil
+}
+
+func l2(v []float64) float64 {
+	s := 0.0
+	for _, x := range v {
+		s += x * x
+	}
+	return math.Sqrt(s)
 }
 
 func main() {
-	engineURL := flag.String("engine-url", "http://127.0.0.1:18100", "llama-server base URL (must run with --embedding)")
+	engineURL := flag.String("engine-url", "http://127.0.0.1:18100", "llama-server base URL (must run --embedding --pooling none --embd-normalize -1)")
 	promptsCSV := flag.String("prompts", "", "comma-separated prompt texts")
 	promptsFile := flag.String("prompts-file", "", "file with one prompt per line (overrides -prompts)")
 	model := flag.String("model", "", "model label recorded in the dataset")
 	out := flag.String("out", "", "output dataset JSON path (required)")
-	allowPooled := flag.Bool("allow-pooled", false, "accept multi-token prompts (dataset is then labeled pooled, NOT exact hidden states)")
 	flag.Parse()
 	if *out == "" {
 		fmt.Fprintln(os.Stderr, "-out is required")
@@ -98,47 +111,49 @@ func main() {
 
 	client := &http.Client{Timeout: 5 * time.Minute}
 	set := &progressive.ActivationSet{
-		Kind:   progressive.KindExactHidden,
-		Source: fmt.Sprintf("llama-server /v1/embeddings at %s (server started with --embedding); single-token prompts only, pooling is identity", *engineURL),
+		Kind:   progressive.KindHiddenCandidate,
+		Source: fmt.Sprintf("llama-server native /embedding at %s (dedicated instance: --embedding --pooling none --embd-normalize -1); per-token vectors, last position kept for multi-token prompts; NOT yet logit-verified", *engineURL),
 		Model:  *model,
 	}
-	pooled := 0
-	skipped := 0
+	allUnit := true
 	for _, p := range prompts {
-		vec, ntok, err := fetchEmbedding(client, *engineURL, p)
+		vecs, err := fetchTokens(client, *engineURL, p)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "prompt %q: %v\n", p, err)
 			os.Exit(1)
 		}
+		v := vecs[len(vecs)-1]
 		if set.HiddenSize == 0 {
-			set.HiddenSize = len(vec)
+			set.HiddenSize = len(v)
 		}
-		if len(vec) != set.HiddenSize {
-			fmt.Fprintf(os.Stderr, "prompt %q: width %d != %d\n", p, len(vec), set.HiddenSize)
+		if len(v) != set.HiddenSize {
+			fmt.Fprintf(os.Stderr, "prompt %q: width %d != %d\n", p, len(v), set.HiddenSize)
 			os.Exit(1)
 		}
-		if ntok != 1 {
-			if !*allowPooled {
-				fmt.Fprintf(os.Stderr, "prompt %q tokenized to %d tokens — SKIPPED (would be pooled, not an exact hidden state); pass -allow-pooled to include pooled vectors\n", p, ntok)
-				skipped++
-				continue
-			}
-			pooled++
+		pos := "single"
+		if len(vecs) > 1 {
+			pos = "last"
 		}
-		set.Vectors = append(set.Vectors, vec)
-		fmt.Fprintf(os.Stderr, "collected %q (%d token(s), width %d)\n", p, ntok, len(vec))
+		n := l2(v)
+		if math.Abs(n-1) > 0.01 {
+			allUnit = false
+		}
+		set.Vectors = append(set.Vectors, v)
+		set.Prompts = append(set.Prompts, p)
+		set.Positions = append(set.Positions, pos)
+		set.Norms = append(set.Norms, n)
+		fmt.Fprintf(os.Stderr, "collected %q (%d token(s), position=%s, L2 norm %.2f)\n", p, len(vecs), pos, n)
 	}
-	if pooled > 0 {
-		set.Kind = progressive.KindPooled
-		set.Source += "; WARNING: dataset contains pooled multi-token vectors"
-	}
-	if len(set.Vectors) == 0 {
-		fmt.Fprintln(os.Stderr, "no vectors collected (all prompts skipped or failed)")
-		os.Exit(1)
+	if allUnit {
+		// The server normalized despite the flags — these are
+		// direction-only embeddings, not hidden states.
+		set.Kind = progressive.KindEmbeddingNormalized
+		set.Normalized = true
+		set.Source += "; WARNING: all norms ≈ 1 — the server L2-normalized the output"
 	}
 	if err := progressive.SaveActivations(*out, set); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %d vectors (kind=%s, skipped %d multi-token) to %s\n", len(set.Vectors), set.Kind, skipped, *out)
+	fmt.Fprintf(os.Stderr, "wrote %d vectors (kind=%s) to %s — run hidden-verify before calling them hidden states\n", len(set.Vectors), set.Kind, *out)
 }

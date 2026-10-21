@@ -53,33 +53,54 @@ go run ./experiments/progressive/cmd/progressive-demo \
   -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf -tensor output.weight
 ```
 
-Real hidden activations are collected without modifying llama.cpp:
-`cmd/hidden-collector` uses the server's `/v1/embeddings` endpoint
-(start the server with `--embedding --pooling mean`). For a prompt of
-exactly one token, pooling is the identity, so the returned vector is
-the final hidden state — the exact input of `output.weight`. The
-collector verifies the token count from the response usage and skips
-multi-token prompts; datasets are kind-labeled
-(`exact_hidden_single_token` vs `pooled_multi_token` vs `synthetic`)
-and the demo refuses pooled data unless `-allow-pooled` is passed.
+Real hidden activations are collected without modifying llama.cpp —
+but the obvious path is a trap: `/v1/embeddings` output is
+**L2-normalized by default** (`embd_normalize=2` in llama.cpp), so
+those vectors are direction-only embeddings, NOT hidden states. An
+earlier revision of this module made exactly that mistake; the label
+has been corrected and the data re-collected properly:
+
+- `cmd/hidden-collector` uses a dedicated instance started with
+  `--embedding --pooling none --embd-normalize -1` and the native
+  `/embedding` endpoint, which returns raw per-token vectors. It
+  records prompts, positions, and L2 norms, and labels the output
+  `hidden_candidate_unverified` (or `embedding_l2_normalized` if the
+  norms come back ≈ 1 anyway).
+- `cmd/hidden-verify` is the only path to an `exact_hidden_*` label:
+  it reconstructs logits from each vector (`output.weight · h`, plus
+  `output.bias` when a model has one) and compares them with a
+  separate completion instance's real top-20 logprobs. Measured on
+  the bundled Qwen2.5-0.5B: true vectors err ≤ 0.094; normalized
+  vectors err 8.56–11.06. `ActivationSet.Validate` rejects an
+  exact-hidden label without a recorded verification, so the
+  round-2 labeling bug is now structurally impossible.
+- Contextual (last-token) collection works, but those vectors have
+  not passed the strict verification tolerance and stay candidates.
+
 Datasets themselves are experiment data and are not committed to the
 repository.
 
 ```sh
-# collect real hidden activations (separate llama-server instance with
-# --embedding --pooling mean), then real weights + real activations
+# collect candidate hidden activations (dedicated instance with
+# --embedding --pooling none --embd-normalize -1), verify them against
+# real logits (separate completion instance on :18099), then run
 go run ./experiments/progressive/cmd/hidden-collector \
   -engine-url http://127.0.0.1:18100 \
   -prompts "Hello,The,Water,Fire,Paris,king,queen,cat" \
-  -model qwen2.5-0.5b-instruct -out /tmp/hidden.json
+  -model qwen2.5-0.5b-instruct -out /tmp/hidden-candidates.json
+go run ./experiments/progressive/cmd/hidden-verify \
+  -dataset /tmp/hidden-candidates.json \
+  -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+  -engine-url http://127.0.0.1:18099 -out /tmp/hidden-verified.json
 go run ./experiments/progressive/cmd/progressive-demo \
   -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf -tensor output.weight \
-  -activations /tmp/hidden.json -full-vocab
+  -activations /tmp/hidden-verified.json -full-vocab
 ```
 
-Measured on 2026-10-21 (19 single-token prompts, full 151,936-row
-vocabulary): INT4 match 26.3% / certified 0%, INT8 match 100% /
-certified 0%, FP16 match 100% / certified 78.9%. Real activations are
+Measured on 2026-10-21 (19 single-token prompts, logit-verified raw
+hidden states, full 151,936-row vocabulary): INT4 match 26.3% /
+certified 0%, INT8 match 100% / certified 0%, FP16 match 100% /
+certified 78.9%. Real activations are
 far less forgiving than Gaussian ones (compare the synthetic runs in
 the docs) — and at vocabulary scale the pairwise bound is too
 pessimistic to certify INT8 despite a perfect match rate. Both facts

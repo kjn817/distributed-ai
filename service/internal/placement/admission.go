@@ -354,6 +354,19 @@ type ShadowRecord struct {
 	Decision AdmissionDecision `json:"decision"`
 }
 
+// PredictionErrorPct compares a decision's predicted joint time with a
+// later MEASURED actual joint wall time, returning the absolute error
+// as a percentage of the actual. ok=false when the decision carried no
+// joint prediction (e.g. insufficient_data) or the actual is invalid —
+// in that case no error figure exists and none may be reported.
+func PredictionErrorPct(d AdmissionDecision, actualJointMs float64) (pct float64, ok bool) {
+	if d.PredictedJointMs == nil || actualJointMs <= 0 ||
+		math.IsNaN(actualJointMs) || math.IsInf(actualJointMs, 0) {
+		return 0, false
+	}
+	return 100 * math.Abs(*d.PredictedJointMs-actualJointMs) / actualJointMs, true
+}
+
 // ShadowRecorder is a bounded in-memory log of admission decisions.
 // It has no effect on placement; it exists so the shadow predictions can
 // later be compared against real outcomes.

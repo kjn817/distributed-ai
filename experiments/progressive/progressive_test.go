@@ -257,19 +257,35 @@ func TestCertifyFailureCases(t *testing.T) {
 }
 
 func TestActivationSetValidation(t *testing.T) {
-	good := &ActivationSet{Kind: KindExactHidden, Source: "test", HiddenSize: 2,
-		Vectors: [][]float64{{1, 2}, {3, 4}}}
+	good := &ActivationSet{Kind: KindExactHiddenSingle, Source: "test", HiddenSize: 2,
+		VerifiedLogits: true, Vectors: [][]float64{{1, 2}, {3, 4}}}
 	if err := good.Validate(); err != nil {
 		t.Fatalf("valid set rejected: %v", err)
 	}
-	if !good.IsReal() {
-		t.Error("exact hidden set must count as real")
+	if !good.IsReal() || !good.IsVerifiedHidden() {
+		t.Error("verified exact hidden set must count as real + verified")
+	}
+	// Label discipline: the exact label without verification is an
+	// error — this is the round-2 labeling bug, now structurally
+	// impossible to save or load.
+	unverified := &ActivationSet{Kind: KindExactHiddenSingle, Source: "test", HiddenSize: 2,
+		Vectors: [][]float64{{1, 2}}}
+	if err := unverified.Validate(); err == nil {
+		t.Error("exact-hidden label without logit verification must be rejected")
+	}
+	cand := &ActivationSet{Kind: KindHiddenCandidate, Source: "test", HiddenSize: 2,
+		Vectors: [][]float64{{1, 2}}}
+	if err := cand.Validate(); err != nil {
+		t.Errorf("candidate set must validate: %v", err)
+	}
+	if cand.IsVerifiedHidden() {
+		t.Error("candidate must not count as verified hidden")
 	}
 	syn := &ActivationSet{Kind: KindSynthetic, Source: "gen", HiddenSize: 1, Vectors: [][]float64{{0}}}
 	if syn.IsReal() {
 		t.Error("synthetic set must not count as real")
 	}
-	bad := &ActivationSet{Kind: KindExactHidden, Source: "test", HiddenSize: 3,
+	bad := &ActivationSet{Kind: KindHiddenCandidate, Source: "test", HiddenSize: 3,
 		Vectors: [][]float64{{1, 2}}}
 	if err := bad.Validate(); err == nil {
 		t.Error("width mismatch must fail validation")

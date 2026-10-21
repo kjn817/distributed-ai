@@ -2,6 +2,7 @@ package placement
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,6 +164,31 @@ func TestMeasurementGapsStayUnmeasured(t *testing.T) {
 	in5 := BuildAdmissionInputs(fullMeasurementSet(), nil, Request{ModelID: "m1"}, a2)
 	if in5.WorkerMs.Measured {
 		t.Error("multi-worker worker_ms must stay unmeasured in v1")
+	}
+}
+
+func TestPredictionErrorPct(t *testing.T) {
+	d := DecideAdmission(fullInputs(), 10)
+	if d.PredictedJointMs == nil {
+		t.Fatal("fixture must produce a joint prediction")
+	}
+	pred := *d.PredictedJointMs
+	if pct, ok := PredictionErrorPct(d, pred); !ok || pct != 0 {
+		t.Errorf("exact actual: pct=%v ok=%v, want 0/true", pct, ok)
+	}
+	if pct, ok := PredictionErrorPct(d, pred*2); !ok || pct != 50 {
+		t.Errorf("double actual: pct=%v ok=%v, want 50/true", pct, ok)
+	}
+	// No prediction (insufficient data) -> no error figure may exist.
+	empty := DecideAdmission(AdmissionInputs{}, 10)
+	if _, ok := PredictionErrorPct(empty, 100); ok {
+		t.Error("insufficient decision must not yield a prediction error")
+	}
+	if _, ok := PredictionErrorPct(d, 0); ok {
+		t.Error("zero actual must not yield a prediction error")
+	}
+	if _, ok := PredictionErrorPct(d, math.NaN()); ok {
+		t.Error("NaN actual must not yield a prediction error")
 	}
 }
 

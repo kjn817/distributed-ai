@@ -1,0 +1,584 @@
+DAIN experiment/adaptive-inference — ROUND 3 test evidence (2026-10-21, local VM)
+Cache policy: go test -count=1 (cache disabled).
+llama.cpp: commit 10b8b7553494f3638da7668cf17cac089229122a (b11712), embd_normalize default=2 confirmed in common/common.h:624
+
+=== go build ./... ===
+BUILD_OK
+=== go vet ./... ===
+VET_OK
+=== go test -count=1 ./... ===
+ok  	distributed-ai/engine	0.089s
+ok  	distributed-ai/experiments/progressive	4.049s
+?   	distributed-ai/experiments/progressive/cmd/hidden-collector	[no test files]
+?   	distributed-ai/experiments/progressive/cmd/hidden-verify	[no test files]
+?   	distributed-ai/experiments/progressive/cmd/progressive-demo	[no test files]
+ok  	distributed-ai/limits	0.027s
+?   	distributed-ai/node/cmd/node	[no test files]
+ok  	distributed-ai/node/internal/chunks	3.668s
+ok  	distributed-ai/node/internal/executor	0.161s
+ok  	distributed-ai/node/internal/hardware	0.006s
+ok  	distributed-ai/node/internal/identity	0.014s
+ok  	distributed-ai/node/internal/materialize	0.087s
+ok  	distributed-ai/node/internal/p2p	0.629s
+ok  	distributed-ai/node/internal/protocol	0.010s
+ok  	distributed-ai/node/internal/reporter	1.269s
+?   	distributed-ai/node/internal/rpcworker	[no test files]
+?   	distributed-ai/protocol	[no test files]
+?   	distributed-ai/service/cmd/admission-probe	[no test files]
+?   	distributed-ai/service/cmd/chunk-model	[no test files]
+?   	distributed-ai/service/cmd/rpc-probe	[no test files]
+?   	distributed-ai/service/cmd/server	[no test files]
+ok  	distributed-ai/service/internal/api	0.053s
+ok  	distributed-ai/service/internal/credit	0.006s
+?   	distributed-ai/service/internal/dashboard	[no test files]
+ok  	distributed-ai/service/internal/dispatch	0.141s
+ok  	distributed-ai/service/internal/metrics	0.015s
+ok  	distributed-ai/service/internal/model	1.403s
+ok  	distributed-ai/service/internal/p2pnet	0.201s
+ok  	distributed-ai/service/internal/placement	0.009s
+ok  	distributed-ai/service/internal/quest	0.023s
+ok  	distributed-ai/service/internal/registry	0.005s
+ok  	distributed-ai/service/internal/replica	0.006s
+
+=== hidden-verify: single-token (PROMOTED) ===
+{
+  "model_sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "server_model": "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+  "tensor": "output.weight",
+  "bias_tensor_present": false,
+  "tolerance_logprob": 0.1,
+  "samples": [
+    {
+      "prompt": "Hello",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 231.63365537235003,
+      "server_chosen_id": 271,
+      "recon_argmax_id": 271,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.056786789255710346,
+      "chosen_logprob_err": 0.014559782784663966,
+      "pass": true
+    },
+    {
+      "prompt": "The",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 276.6481468960095,
+      "server_chosen_id": 2701,
+      "recon_argmax_id": 2701,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.09427627251693593,
+      "chosen_logprob_err": 0.010314412160571607,
+      "pass": true
+    },
+    {
+      "prompt": "Water",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 232.19497839042032,
+      "server_chosen_id": 11,
+      "recon_argmax_id": 11,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.06057555449780416,
+      "chosen_logprob_err": 0.006370503263491756,
+      "pass": true
+    },
+    {
+      "prompt": "Fire",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 216.84230951930547,
+      "server_chosen_id": 16731,
+      "recon_argmax_id": 16731,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.06184982494733404,
+      "chosen_logprob_err": 0.009028905341706306,
+      "pass": true
+    },
+    {
+      "prompt": "Paris",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 214.37935058467878,
+      "server_chosen_id": 11,
+      "recon_argmax_id": 11,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.057252556211610184,
+      "chosen_logprob_err": 0.012654403561230154,
+      "pass": true
+    },
+    {
+      "prompt": "king",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 227.31125948043604,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.08533996073514238,
+      "chosen_logprob_err": 0.009021190883595764,
+      "pass": true
+    },
+    {
+      "prompt": "queen",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 234.4394211163043,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.04893561995834794,
+      "chosen_logprob_err": 0.019299913546252156,
+      "pass": true
+    },
+    {
+      "prompt": "cat",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 225.0687919067823,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.07833521291416723,
+      "chosen_logprob_err": 0.030388956020624747,
+      "pass": true
+    },
+    {
+      "prompt": "dog",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 224.35304411782386,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.09037210081749336,
+      "chosen_logprob_err": 0.02944442517048529,
+      "pass": true
+    },
+    {
+      "prompt": "sun",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 212.47425887785062,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.07330832212106486,
+      "chosen_logprob_err": 0.02322378050189755,
+      "pass": true
+    },
+    {
+      "prompt": "moon",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 219.06680187364933,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.08896147572740354,
+      "chosen_logprob_err": 0.004708281147189908,
+      "pass": true
+    },
+    {
+      "prompt": "book",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 234.89961307815935,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.05327489265471641,
+      "chosen_logprob_err": 0.013553841950638912,
+      "pass": true
+    },
+    {
+      "prompt": "time",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 239.9736506053603,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.06352486822807002,
+      "chosen_logprob_err": 0.017548220547725535,
+      "pass": true
+    },
+    {
+      "prompt": "love",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 228.13669382743828,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.0638491841581299,
+      "chosen_logprob_err": 0.0367373254570893,
+      "pass": true
+    },
+    {
+      "prompt": "data",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 257.40997669611323,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.0779990583791097,
+      "chosen_logprob_err": 0.009221843979755562,
+      "pass": true
+    },
+    {
+      "prompt": "code",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 240.76524649878823,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.07908369945365656,
+      "chosen_logprob_err": 0.02820342761310357,
+      "pass": true
+    },
+    {
+      "prompt": "light",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 227.38661616700855,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.06285822102728567,
+      "chosen_logprob_err": 0.01764297394887926,
+      "pass": true
+    },
+    {
+      "prompt": "world",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 233.6331588252084,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.06980060197245308,
+      "chosen_logprob_err": 0.05007618655478829,
+      "pass": true
+    },
+    {
+      "prompt": "music",
+      "position": "single",
+      "tokens_evaluated": 1,
+      "norm": 232.12773588241137,
+      "server_chosen_id": 284,
+      "recon_argmax_id": 284,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.04880552909547475,
+      "chosen_logprob_err": 0.01748049412733721,
+      "pass": true
+    }
+  ],
+  "all_pass": true,
+  "promoted_kind": "exact_hidden_single_token"
+}
+=== hidden-verify: L2-normalized counterfactual (FAILED as expected) ===
+{
+ "all_pass": false,
+ "max_top_err": 11.064271464278299,
+ "argmax_matches": 19,
+ "samples": 19
+}
+=== hidden-verify: contextual last-token, 1-thread pair (NOT promoted) ===
+{
+  "model_sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "server_model": "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+  "tensor": "output.weight",
+  "bias_tensor_present": false,
+  "tolerance_logprob": 0.1,
+  "samples": [
+    {
+      "prompt": "The capital of France is",
+      "position": "last",
+      "tokens_evaluated": 5,
+      "norm": 279.2697422869753,
+      "server_chosen_id": 12095,
+      "recon_argmax_id": 12095,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.11699970076058186,
+      "chosen_logprob_err": 0.00937752606708031,
+      "pass": false
+    },
+    {
+      "prompt": "The capital of Japan is",
+      "position": "last",
+      "tokens_evaluated": 5,
+      "norm": 266.9703284417473,
+      "server_chosen_id": 1304,
+      "recon_argmax_id": 1304,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.07273899001732254,
+      "chosen_logprob_err": 0.012662200253902967,
+      "pass": true
+    },
+    {
+      "prompt": "The largest planet is",
+      "position": "last",
+      "tokens_evaluated": 4,
+      "norm": 292.7407281811414,
+      "server_chosen_id": 279,
+      "recon_argmax_id": 220,
+      "argmax_match": false,
+      "max_top_logprob_err": 0.1530504221016873,
+      "chosen_logprob_err": 0.07912488916913496,
+      "pass": false
+    },
+    {
+      "prompt": "Water is made of hydrogen and",
+      "position": "last",
+      "tokens_evaluated": 6,
+      "norm": 267.32004308535255,
+      "server_chosen_id": 23552,
+      "recon_argmax_id": 23552,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.07832929863548266,
+      "chosen_logprob_err": 0.002214549411799993,
+      "pass": true
+    },
+    {
+      "prompt": "The quick brown fox jumps over the lazy",
+      "position": "last",
+      "tokens_evaluated": 8,
+      "norm": 243.74232245987196,
+      "server_chosen_id": 5562,
+      "recon_argmax_id": 5562,
+      "argmax_match": true,
+      "max_top_logprob_err": 0.2635006148449328,
+      "chosen_logprob_err": 0.002860773370414904,
+      "pass": false
+    }
+  ],
+  "all_pass": false
+}
+=== progressive demo: verified raw hidden, full vocab ===
+{
+  "experiment": "certified activation quantization — single affine layer",
+  "guarantee_scope": "single_affine_layer_only",
+  "transformer_wide_guarantee": false,
+  "data_source": "real GGUF tensor \"output.weight\" (Q8_0) from models/qwen2.5-0.5b-instruct-q4_k_m.gguf — all 151936 rows (full vocabulary)",
+  "activation_source": "VERIFIED exact_hidden_single_token — llama-server native /embedding at http://127.0.0.1:18100 (dedicated instance: --embedding --pooling none --embd-normalize -1); per-token vectors, last position kept for multi-token prompts; NOT yet logit-verified | hidden-verify: reconstructed logits (output.weight × h, bias=false) vs llama-server /completion top-20 logprobs; 19/19 samples argmax match, max |Δlogprob| 0.0943 \u003c= tol 0.10; model sha256 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db; server model \"models/qwen2.5-0.5b-instruct-q4_k_m.gguf\"",
+  "samples": 19,
+  "width": 896,
+  "classes": 151936,
+  "results": [
+    {
+      "bits": 4,
+      "argmax_match_rate": 0.2631578947368421,
+      "certified_rate": 0,
+      "compression_ratio": 7.929203539823009,
+      "activation_bytes": 452,
+      "mean_err_bound": 6.847097009644472
+    },
+    {
+      "bits": 8,
+      "argmax_match_rate": 1,
+      "certified_rate": 0,
+      "compression_ratio": 3.982222222222222,
+      "activation_bytes": 900,
+      "mean_err_bound": 0.3773990477756795
+    },
+    {
+      "bits": 16,
+      "argmax_match_rate": 1,
+      "certified_rate": 0.7894736842105263,
+      "compression_ratio": 2,
+      "activation_bytes": 1792,
+      "mean_err_bound": 0.03125
+    }
+  ],
+  "progressive_refinement_implemented": false,
+  "extra_bits_transmitted": 0,
+  "extra_rtt_cost_ms": null,
+  "notes": [
+    "INT4/INT8/FP16 are independent quantizations of the same vector, not stages of a progressive stream",
+    "progressive bitplane refinement is not implemented; no extra bits were transmitted and no extra RTT was measured",
+    "the certificate covers this one affine layer only; no claim is made about a full Transformer",
+    "compression ratio compares one activation vector against FP32 and includes the 4-byte scale (INT4/INT8)"
+  ]
+}
+=== single-node measurement (round 3 recapture) ===
+{
+  "model_id": "qwen2.5-0.5b-q4",
+  "model_weights_hash": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "node_id": "local-vm",
+  "role": "single",
+  "wall_ms": {
+    "value": 2537.171,
+    "measured": true,
+    "source": "probe wall clock"
+  },
+  "prefill_ms": {
+    "value": 644.37,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "decode_ms": {
+    "value": 1888.405,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "compute_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "prompt_tokens": 36,
+  "gen_tokens": 33,
+  "tokens_per_second": {
+    "value": 16.945517513457123,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "rtt_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "bandwidth_mbps": {
+    "value": 0,
+    "measured": false
+  },
+  "rpc_connected": false,
+  "tensor_bytes": {
+    "value": 0,
+    "measured": false
+  },
+  "overhead_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "success": true,
+  "source": "llama-server /v1/chat/completions (wall clock + engine timings)",
+  "at": "2026-10-21T14:21:00.739487402+09:00"
+}
+=== rpc-probe run1 (multi-thread worker: residual method fails, honest insufficient) ===
+{
+ "wall_ms": 1922.161,
+ "coordinator_cpu_ms": 69.99999999999977,
+ "worker_cpu_ms": 2510,
+ "overhead_ms_residual": -676.8979999202371,
+ "overhead_measured": false
+}
+decision: insufficient_data ['overhead_ms:unmeasured']
+=== rpc-probe run2 (-t 1 pair: pipeline completes) ===
+{
+  "actual_joint_wall_ms": 1363.409,
+  "admission_decision": {
+    "request_id": "rpc-probe-local",
+    "model_id": "qwen2.5-0.5b-q4",
+    "mode": "distributed_candidate",
+    "reason": "predicted joint execution clears the threshold — EXPERIMENT candidate only: joint execution is not production-verified and must not be assigned in production",
+    "inputs": {
+      "request_id": "rpc-probe-local",
+      "model_id": "qwen2.5-0.5b-q4",
+      "best_single_ms": {
+        "value": 2537.171,
+        "measured": true,
+        "source": "llama-server /v1/chat/completions (wall clock + engine timings)"
+      },
+      "coordinator_ms": {
+        "value": 20,
+        "measured": true,
+        "source": "coordinator process CPU time delta (/proc stat utime+stime)"
+      },
+      "worker_ms": {
+        "value": 1230,
+        "measured": true,
+        "source": "worker process CPU time delta (/proc stat utime+stime)"
+      },
+      "rtt_ms": {
+        "value": 0.373,
+        "measured": true,
+        "source": "median TCP connect time to the RPC port (loopback handshake)"
+      },
+      "rtt_rounds": 9,
+      "rtt_rounds_known": true,
+      "payload_bytes": {
+        "value": 6135294,
+        "measured": true,
+        "source": "loopback tx byte delta during the request window (tensor payload + protocol overhead + probe HTTP)"
+      },
+      "bandwidth_mbps": {
+        "value": 18223.860191759748,
+        "measured": true,
+        "source": "probe bulk TCP transfer on loopback (32 MiB)"
+      },
+      "overhead_ms": {
+        "value": 107.35869838971924,
+        "measured": true,
+        "source": "residual: wall - coordinator CPU - worker CPU - (RTT x rounds + transfer)"
+      },
+      "gates": {
+        "rpc_reachable": true,
+        "model_ready": true,
+        "joint_execution_proven": false
+      },
+      "notes": [
+        "single-node measurement: 16.9 tok/s, 36 prompt + 33 gen tokens (node local-coord)",
+        "weights sha256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+        "model_ready evaluated from the registry for all assignment participants"
+      ]
+    },
+    "min_saving_pct": 10,
+    "scopes": {
+      "bandwidth_mbps": "throughput measured on the same coordinator↔worker path as rtt_ms",
+      "best_single_ms": "end-to-end wall time of the request on the best single node (its prefill+decode), excluding client-side network",
+      "coordinator_ms": "pure compute time attributed to the coordinator in a joint run; excludes RPC transfer time and synchronization waits",
+      "overhead_ms": "measured residual overhead (serialization, scheduling, engine coordination) excluding transfer time, which is computed separately",
+      "payload_bytes": "actual tensor/activation bytes exchanged with the worker for this request",
+      "rtt_ms": "one round trip on the coordinator↔worker path; total latency is priced as rtt_ms × rtt_rounds and must not also be included in compute times",
+      "transfer_ms": "derived once from payload_bytes × 8 / bandwidth; never also included in overhead_ms",
+      "worker_ms": "pure compute time attributed to the worker in a joint run; excludes RPC transfer time and synchronization waits"
+    },
+    "experimental_eligible": true,
+    "production_verified": false,
+    "predicted_single_ms": 2537.171,
+    "predicted_joint_ms": 1363.409,
+    "transfer_ms": 2.6933016102808716,
+    "predicted_saving_pct": 46.26262873097634,
+    "shadow": true
+  },
+  "bandwidth_mbps": 18223.860191759748,
+  "coordinator_cpu_ms": 20,
+  "environment": "isolated local loopback — NOT WAN (Mac↔Oracle) evidence",
+  "gen_tokens": 8,
+  "layer_placement": "-ngl 99 (all model layers on the RPC worker device)",
+  "model_id": "qwen2.5-0.5b-q4",
+  "model_weights_hash": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "network_ms_est": 6.050301610280872,
+  "network_path": "local-loopback-ggml-rpc (NOT WAN evidence)",
+  "note": "experimental eligibility on loopback is not production verification and not WAN evidence; routing is unchanged (shadow)",
+  "overhead_measured": true,
+  "overhead_ms_residual": 107.35869838971924,
+  "predicted_joint_ms": 1363.409,
+  "prediction_error_pct": 0,
+  "production_verified": false,
+  "prompt_tokens": 36,
+  "rtt_ms_median_tcp": 0.373,
+  "rtt_rounds": 9,
+  "tensor_bytes_total": 6135294,
+  "wall_ms": 1363.409,
+  "worker_cpu_ms": 1230
+}
+=== rpc-probe run3 (cross-run prediction, same prompt) ===
+{
+ "wall_ms": 435.337,
+ "prediction_source": "prior run /tmp/rpc-run2",
+ "predicted_joint_ms": 1363.409,
+ "actual_joint_wall_ms": 435.337,
+ "prediction_error_pct": 213.18472815313197
+}
+=== rpc-probe run4 (cross-run prediction, fresh prompt) ===
+{
+ "wall_ms": 627.872,
+ "prediction_source": "prior run /tmp/rpc-run2",
+ "predicted_joint_ms": 1363.409,
+ "actual_joint_wall_ms": 627.872,
+ "prediction_error_pct": 117.14760333316347
+}

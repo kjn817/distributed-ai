@@ -104,8 +104,21 @@ func main() {
 				fmt.Fprintf(os.Stderr, "activation width %d != weight row width %d\n", set.HiddenSize, len(W[0]))
 				os.Exit(1)
 			}
-			rep, err = progressive.RunExperiment(W, set.Vectors, dataSrc,
-				fmt.Sprintf("%s — %s", set.Kind, set.Source))
+			// Label discipline: only a logit-verified dataset may be
+			// reported as hidden states. Candidates and normalized
+			// embeddings are labeled as what they are.
+			actSrc := ""
+			switch {
+			case set.IsVerifiedHidden():
+				actSrc = fmt.Sprintf("VERIFIED %s — %s | %s", set.Kind, set.Source, set.Verification)
+			case set.Kind == progressive.KindEmbeddingNormalized:
+				actSrc = fmt.Sprintf("L2-NORMALIZED EMBEDDINGS (not hidden states) — %s", set.Source)
+			case set.Kind == progressive.KindHiddenCandidate:
+				actSrc = fmt.Sprintf("UNVERIFIED hidden candidates (logit verification not passed) — %s", set.Source)
+			default:
+				actSrc = fmt.Sprintf("%s — %s", set.Kind, set.Source)
+			}
+			rep, err = progressive.RunExperiment(W, set.Vectors, dataSrc, actSrc)
 		} else {
 			acts := progressive.SyntheticActivations(*seed, *samples, len(W[0]))
 			rep, err = progressive.RunExperiment(W, acts, dataSrc,

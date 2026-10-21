@@ -166,6 +166,79 @@ extra-bit transmission and its RTT cost. See
   the embedding instance must serve embeddings only (separate
   instances per role). Recorded here so nobody rediscovers it.
 
+## Round 3 (2026-10-21) — hidden-state correction + RPC measurement
+
+### Hidden-state accuracy: the round-2 label was wrong; the numbers survive
+
+Round 2 collected activations via `/v1/embeddings` with
+`--pooling mean` and labeled them `exact_hidden_single_token`. That
+label was **wrong**: llama.cpp's `embd_normalize` defaults to 2 (L2)
+in the bundled build (commit `10b8b7553494f3638da7668cf17cac089229122a`,
+b11712 — confirmed in `common/common.h`), so those vectors were
+L2-normalized direction vectors, not hidden states.
+
+Round 3 establishes the verified path (no llama.cpp modification):
+
+- A dedicated instance with `--embedding --pooling none
+  --embd-normalize -1` serves the native `/embedding` endpoint:
+  per-token raw vectors (norms ≈ 230–290, not 1).
+- `cmd/hidden-verify` reconstructs logits (`output.weight · h`; this
+  model has no `output.bias`) and compares them against a separate
+  completion instance's real top-20 logprobs. True vectors: max
+  |Δlogprob| 0.094, argmax 19/19. The normalized counterfactual errs
+  by 8.56–11.06 — the check discriminates by ~100×.
+- Single-token datasets are promoted to `exact_hidden_single_token`
+  only on a full pass (label discipline is enforced in
+  `ActivationSet.Validate`). Contextual last-token vectors behave as
+  true hidden states at the head of the distribution (chosen-token
+  logprob error ≤ 0.08, 4/5 argmax, one near-tie flip) but fail the
+  strict top-20 tolerance (max 0.26 even single-threaded), so they
+  remain `hidden_candidate_unverified` — not promoted, not hidden
+  behind a loosened threshold.
+- Re-running the experiment on verified raw hidden states reproduces
+  the round-2 rates exactly (full vocab INT4 26.3%/0%, INT8 100%/0%,
+  FP16 100%/78.9%): per-sample positive scaling changes neither argmax
+  nor the scale-equivariant symmetric-quantization certificate. The
+  numbers were right; their provenance label was not. Both facts are
+  recorded.
+
+### RPC path measurement (isolated loopback) + admission connection
+
+`service/cmd/rpc-probe` measures a real ggml-rpc joint run locally:
+process-CPU compute per role, TCP-handshake RTT, bulk loopback
+bandwidth, loopback byte deltas (tensor + protocol), protocol-known
+round count, residual overhead, weights hash, layer placement
+(-ngl 99). Findings, recorded as-is:
+
+- Multi-threaded ggml-rpc worker CPU time (2510 ms) exceeds the wall
+  time (1922 ms) — thread spin makes CPU deltas an invalid
+  pure-compute proxy there; with `-t 1` on both sides the accounting
+  closes (wall 1363 ms = coord 20 + worker 1230 + network ≈6 +
+  residual overhead 107).
+- With measured inputs the shadow decision on loopback is
+  `distributed_candidate`, `experimental_eligible=true`,
+  `production_verified=false` — as designed.
+- Prediction-vs-actual (`placement.PredictionErrorPct`): a same-run
+  comparison is circular (the residual definition forces 0%) and is
+  labeled as such. Cross-run, the prior run's prediction (1363 ms)
+  vs fresh actuals (435 ms, 628 ms) errs by 213% / 117% — dominated
+  by shared-VM CPU variance and prompt-cache reuse, i.e. loopback
+  CPU-time inputs on this VM are too noisy for tight prediction. The
+  recording machinery works; the error figures are methodology data,
+  not WAN or algorithm-quality evidence.
+- Path mixing is prevented by the `NetworkPath` equality rule in
+  `BuildAdmissionInputs`; every record here carries
+  `local-loopback-ggml-rpc (NOT WAN evidence)`.
+
+### Phase A networking
+
+The libp2p Relay + NAT Traversal direction from round 1 stands.
+`docs/phase-a-relay-minimal-plan.md` turns the review into a minimal
+implementation plan (new `node/cmd/relay`, host options, reporter ACK
++ PeerID binding, direct/relayed log discipline, acceptance tests).
+Nothing is built or deployed by that document; relay hosting/domain
+decisions and any Oracle change remain separately gated.
+
 ## Explicit non-results
 
 - No joint inference was executed; no Phase B run; nothing was

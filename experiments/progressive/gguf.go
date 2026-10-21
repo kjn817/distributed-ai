@@ -331,20 +331,35 @@ func (f *GGUFFile) Find(name string) (TensorInfo, bool) {
 // tensor without loading it whole; the returned count is the number of
 // elements actually returned.
 func (f *GGUFFile) ExtractTensor(r io.ReaderAt, size int64, name string, maxElems int) ([]float64, error) {
+	n := 0
+	if maxElems > 0 {
+		n = maxElems
+	}
+	return f.ExtractTensorSlice(r, size, name, 0, n)
+}
+
+// ExtractTensorSlice dequantizes elements [startElem, startElem+count)
+// of a tensor (count <= 0 means "to the end"). It exists so callers can
+// stream a large tensor in blocks without holding it whole. For Q8_0,
+// startElem must be a multiple of the 32-element block size.
+func (f *GGUFFile) ExtractTensorSlice(r io.ReaderAt, size int64, name string, startElem, count int) ([]float64, error) {
 	ti, ok := f.Find(name)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrTensorNotFound, name)
 	}
 	n := ti.NumElements()
-	want := n
-	if maxElems > 0 && uint64(maxElems) < want {
-		want = uint64(maxElems)
+	if startElem < 0 || uint64(startElem) > n {
+		return nil, fmt.Errorf("progressive: slice start %d out of range (%d elements)", startElem, n)
+	}
+	want := n - uint64(startElem)
+	if count > 0 && uint64(count) < want {
+		want = uint64(count)
 	}
 	start := f.dataStart + int64(ti.Offset)
 	switch ti.Type {
 	case TensorF32:
 		raw := make([]byte, want*4)
-		if _, err := r.ReadAt(raw, start); err != nil {
+		if _, err := r.ReadAt(raw, start+int64(startElem)*4); err != nil {
 			return nil, err
 		}
 		out := make([]float64, want)
@@ -354,7 +369,7 @@ func (f *GGUFFile) ExtractTensor(r io.ReaderAt, size int64, name string, maxElem
 		return out, nil
 	case TensorF16:
 		raw := make([]byte, want*2)
-		if _, err := r.ReadAt(raw, start); err != nil {
+		if _, err := r.ReadAt(raw, start+int64(startElem)*2); err != nil {
 			return nil, err
 		}
 		out := make([]float64, want)
@@ -365,9 +380,12 @@ func (f *GGUFFile) ExtractTensor(r io.ReaderAt, size int64, name string, maxElem
 	case TensorQ8_0:
 		// Blocks of 32 values: FP16 scale + 32 int8 codes (34 bytes).
 		const blockVals, blockBytes = 32, 34
+		if startElem%blockVals != 0 {
+			return nil, fmt.Errorf("progressive: Q8_0 slice start %d is not block-aligned (32)", startElem)
+		}
 		blocks := (want + blockVals - 1) / blockVals
 		raw := make([]byte, blocks*blockBytes)
-		if _, err := r.ReadAt(raw, start); err != nil {
+		if _, err := r.ReadAt(raw, start+int64(startElem/blockVals)*blockBytes); err != nil {
 			return nil, err
 		}
 		out := make([]float64, 0, want)
