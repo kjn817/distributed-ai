@@ -55,7 +55,8 @@ Environment:
   ADMISSION_SHADOW=1 record Adaptive Compute Admission decisions in
                      shadow mode (observational only; placement unchanged).
                      ADMISSION_MIN_SAVING_PCT tunes the candidate threshold
-                     (default 10).
+                     (default 10). ADMISSION_ADMIN_KEY gates the shadow
+                     inspection endpoint; without it the endpoint is closed.
 `)
 			os.Exit(0)
 		case "--version":
@@ -81,8 +82,15 @@ Environment:
 				minSaving = f
 			}
 		}
-		srv.WithAdmissionShadow(placement.NewShadowRecorder(128), minSaving)
-		log.Printf("admission shadow mode ON (min saving %.1f%%) — recording only, placement unchanged", minSaving)
+		adminKey := os.Getenv("ADMISSION_ADMIN_KEY")
+		mstore := placement.NewMemoryMeasurementStore(256)
+		srv.WithMeasurements(mstore, mstore)
+		srv.WithAdmissionShadow(placement.NewShadowRecorder(128), minSaving, adminKey)
+		if adminKey == "" {
+			log.Printf("admission shadow mode ON (min saving %.1f%%) — recording only, placement unchanged; WARNING: ADMISSION_ADMIN_KEY not set, inspection endpoint stays closed", minSaving)
+		} else {
+			log.Printf("admission shadow mode ON (min saving %.1f%%) — recording only, placement unchanged", minSaving)
+		}
 	}
 
 	// Model manifests: MODELS_DIR (default ../models relative to service/).

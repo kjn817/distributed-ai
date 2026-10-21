@@ -1,0 +1,247 @@
+DAIN experiment/adaptive-inference — ROUND 2 test evidence (2026-10-21, local VM)
+Cache policy: go test -count=1 (test cache DISABLED — every package executed fresh).
+Note: the round-1 evidence file used default caching; several packages there reported (cached). Superseded by this run.
+
+=== go build ./... ===
+BUILD_OK
+
+=== go vet ./... ===
+VET_OK
+
+=== go test -count=1 ./... (ADMISSION_MEASUREMENT_JSON=real probe capture) ===
+ok  	distributed-ai/engine	0.037s
+ok  	distributed-ai/experiments/progressive	3.749s
+?   	distributed-ai/experiments/progressive/cmd/hidden-collector	[no test files]
+?   	distributed-ai/experiments/progressive/cmd/progressive-demo	[no test files]
+ok  	distributed-ai/limits	0.008s
+?   	distributed-ai/node/cmd/node	[no test files]
+ok  	distributed-ai/node/internal/chunks	3.785s
+ok  	distributed-ai/node/internal/executor	0.167s
+ok  	distributed-ai/node/internal/hardware	0.021s
+ok  	distributed-ai/node/internal/identity	0.036s
+ok  	distributed-ai/node/internal/materialize	0.058s
+ok  	distributed-ai/node/internal/p2p	0.700s
+ok  	distributed-ai/node/internal/protocol	0.006s
+ok  	distributed-ai/node/internal/reporter	1.267s
+?   	distributed-ai/node/internal/rpcworker	[no test files]
+?   	distributed-ai/protocol	[no test files]
+?   	distributed-ai/service/cmd/admission-probe	[no test files]
+?   	distributed-ai/service/cmd/chunk-model	[no test files]
+?   	distributed-ai/service/cmd/server	[no test files]
+ok  	distributed-ai/service/internal/api	0.044s
+ok  	distributed-ai/service/internal/credit	0.005s
+?   	distributed-ai/service/internal/dashboard	[no test files]
+ok  	distributed-ai/service/internal/dispatch	0.144s
+ok  	distributed-ai/service/internal/metrics	0.004s
+ok  	distributed-ai/service/internal/model	1.779s
+ok  	distributed-ai/service/internal/p2pnet	0.144s
+ok  	distributed-ai/service/internal/placement	0.030s
+ok  	distributed-ai/service/internal/quest	0.016s
+ok  	distributed-ai/service/internal/registry	0.016s
+ok  	distributed-ai/service/internal/replica	0.006s
+
+=== verbose: real measurement pipeline test ===
+=== RUN   TestRealMeasurementFilePipeline
+    measurement_test.go:216: real measurement: wall 1841.1ms, 36+28 tokens, weights sha256 74a4da8c9fdb…
+--- PASS: TestRealMeasurementFilePipeline (0.00s)
+PASS
+
+=== real probe measurement #1 (llama-server, local VM) ===
+{
+  "model_id": "qwen2.5-0.5b-q4",
+  "model_weights_hash": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "node_id": "local-vm",
+  "role": "single",
+  "wall_ms": {
+    "value": 1841.111,
+    "measured": true,
+    "source": "probe wall clock"
+  },
+  "prefill_ms": {
+    "value": 445.262,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "decode_ms": {
+    "value": 1332.454,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "compute_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "prompt_tokens": 36,
+  "gen_tokens": 28,
+  "tokens_per_second": {
+    "value": 20.26336368835247,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "rtt_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "bandwidth_mbps": {
+    "value": 0,
+    "measured": false
+  },
+  "rpc_connected": false,
+  "tensor_bytes": {
+    "value": 0,
+    "measured": false
+  },
+  "overhead_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "success": true,
+  "source": "llama-server /v1/chat/completions (wall clock + engine timings)",
+  "at": "2026-10-21T13:29:39.858449113+09:00"
+}
+=== real probe measurement #2 ===
+{
+  "model_id": "qwen2.5-0.5b-q4",
+  "model_weights_hash": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "node_id": "local-vm",
+  "role": "single",
+  "wall_ms": {
+    "value": 591.438,
+    "measured": true,
+    "source": "probe wall clock"
+  },
+  "prefill_ms": {
+    "value": 212.872,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "decode_ms": {
+    "value": 372.257,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "compute_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "prompt_tokens": 36,
+  "gen_tokens": 8,
+  "tokens_per_second": {
+    "value": 18.804213218287366,
+    "measured": true,
+    "source": "llama-server timings"
+  },
+  "rtt_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "bandwidth_mbps": {
+    "value": 0,
+    "measured": false
+  },
+  "rpc_connected": false,
+  "tensor_bytes": {
+    "value": 0,
+    "measured": false
+  },
+  "overhead_ms": {
+    "value": 0,
+    "measured": false
+  },
+  "success": true,
+  "source": "llama-server /v1/chat/completions (wall clock + engine timings)",
+  "at": "2026-10-21T13:29:43.208215664+09:00"
+}
+
+=== real hidden activations: full vocabulary (151936 rows), 19 vectors ===
+{
+  "experiment": "certified activation quantization — single affine layer",
+  "guarantee_scope": "single_affine_layer_only",
+  "transformer_wide_guarantee": false,
+  "data_source": "real GGUF tensor \"output.weight\" (Q8_0) from models/qwen2.5-0.5b-instruct-q4_k_m.gguf — all 151936 rows (full vocabulary)",
+  "activation_source": "exact_hidden_single_token — llama-server /v1/embeddings at http://127.0.0.1:18100 (server started with --embedding); single-token prompts only, pooling is identity",
+  "samples": 19,
+  "width": 896,
+  "classes": 151936,
+  "results": [
+    {
+      "bits": 4,
+      "argmax_match_rate": 0.2631578947368421,
+      "certified_rate": 0,
+      "compression_ratio": 7.929203539823009,
+      "activation_bytes": 452,
+      "mean_err_bound": 0.029482865580042504
+    },
+    {
+      "bits": 8,
+      "argmax_match_rate": 1,
+      "certified_rate": 0,
+      "compression_ratio": 3.982222222222222,
+      "activation_bytes": 900,
+      "mean_err_bound": 0.001625039835120453
+    },
+    {
+      "bits": 16,
+      "argmax_match_rate": 1,
+      "certified_rate": 0.7894736842105263,
+      "compression_ratio": 2,
+      "activation_bytes": 1792,
+      "mean_err_bound": 0.0001220703125
+    }
+  ],
+  "progressive_refinement_implemented": false,
+  "extra_bits_transmitted": 0,
+  "extra_rtt_cost_ms": null,
+  "notes": [
+    "INT4/INT8/FP16 are independent quantizations of the same vector, not stages of a progressive stream",
+    "progressive bitplane refinement is not implemented; no extra bits were transmitted and no extra RTT was measured",
+    "the certificate covers this one affine layer only; no claim is made about a full Transformer",
+    "compression ratio compares one activation vector against FP32 and includes the 4-byte scale (INT4/INT8)"
+  ]
+}
+=== real hidden activations: 128-row subset ===
+{
+  "experiment": "certified activation quantization — single affine layer",
+  "guarantee_scope": "single_affine_layer_only",
+  "transformer_wide_guarantee": false,
+  "data_source": "real GGUF tensor \"output.weight\" (Q8_0) from models/qwen2.5-0.5b-instruct-q4_k_m.gguf — 128 of 151936 rows",
+  "activation_source": "exact_hidden_single_token — llama-server /v1/embeddings at http://127.0.0.1:18100 (server started with --embedding); single-token prompts only, pooling is identity",
+  "samples": 19,
+  "width": 896,
+  "classes": 128,
+  "results": [
+    {
+      "bits": 4,
+      "argmax_match_rate": 0.3684210526315789,
+      "certified_rate": 0,
+      "compression_ratio": 7.929203539823009,
+      "activation_bytes": 452,
+      "mean_err_bound": 0.029482865580042504
+    },
+    {
+      "bits": 8,
+      "argmax_match_rate": 1,
+      "certified_rate": 0,
+      "compression_ratio": 3.982222222222222,
+      "activation_bytes": 900,
+      "mean_err_bound": 0.001625039835120453
+    },
+    {
+      "bits": 16,
+      "argmax_match_rate": 1,
+      "certified_rate": 0.6842105263157895,
+      "compression_ratio": 2,
+      "activation_bytes": 1792,
+      "mean_err_bound": 0.0001220703125
+    }
+  ],
+  "progressive_refinement_implemented": false,
+  "extra_bits_transmitted": 0,
+  "extra_rtt_cost_ms": null,
+  "notes": [
+    "INT4/INT8/FP16 are independent quantizations of the same vector, not stages of a progressive stream",
+    "progressive bitplane refinement is not implemented; no extra bits were transmitted and no extra RTT was measured",
+    "the certificate covers this one affine layer only; no claim is made about a full Transformer",
+    "compression ratio compares one activation vector against FP32 and includes the 4-byte scale (INT4/INT8)"
+  ]
+}

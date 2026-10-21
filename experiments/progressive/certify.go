@@ -90,6 +90,13 @@ func CertifyAffine(W [][]float64, b []float64, x []float64, bits int) (LayerResu
 	if err != nil {
 		return LayerResult{}, err
 	}
+	// Overflow guard: a finite input can still saturate FP16 to ±Inf.
+	// Certifying over non-finite logits would be meaningless — refuse.
+	for _, v := range q.Dequantized {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return LayerResult{}, fmt.Errorf("progressive: quantized activation overflowed to a non-finite value at %d bits", bits)
+		}
+	}
 
 	ref := make([]float64, len(W))
 	pred := make([]float64, len(W))

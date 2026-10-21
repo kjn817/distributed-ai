@@ -5,6 +5,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -53,6 +54,14 @@ type Server struct {
 	// Decisions are observational only and never influence placement.
 	admissionShadow       *placement.ShadowRecorder
 	admissionMinSavingPct float64
+	// admissionAdminKey gates the shadow inspection endpoint. Empty key
+	// means the endpoint stays closed (403) even when recording is on:
+	// recorded decisions are operational data, never public.
+	admissionAdminKey string
+	// measurements/proofs feed BuildAdmissionInputs when present; nil
+	// means registry-derived inputs only (the pre-measurement behavior).
+	measurements placement.MeasurementStore
+	proofs       placement.ProofSource
 }
 
 // New creates the API server.
@@ -98,9 +107,23 @@ func (s *Server) WithLedger(l credit.Ledger) *Server {
 // after each successful placement the admission decision is computed from
 // registry-known measurements and recorded. It never changes which
 // assignment is used. Not calling this leaves the feature OFF.
-func (s *Server) WithAdmissionShadow(rec *placement.ShadowRecorder, minSavingPct float64) *Server {
+//
+// adminKey protects the inspection endpoint (Authorization: Bearer
+// <key>). An empty adminKey keeps the endpoint closed (403): recording
+// may run, but nobody can read decisions until a key is configured.
+func (s *Server) WithAdmissionShadow(rec *placement.ShadowRecorder, minSavingPct float64, adminKey string) *Server {
 	s.admissionShadow = rec
 	s.admissionMinSavingPct = minSavingPct
+	s.admissionAdminKey = adminKey
+	return s
+}
+
+// WithMeasurements attaches the measurement store (and proof source)
+// that shadow admission decisions are built from. Without it, decisions
+// use registry-derived inputs only.
+func (s *Server) WithMeasurements(store placement.MeasurementStore, proofs placement.ProofSource) *Server {
+	s.measurements = store
+	s.proofs = proofs
 	return s
 }
 
@@ -275,8 +298,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// recorded for later comparison with real outcomes; the assignment
 	// above is used exactly as before, whatever the decision says.
 	if s.admissionShadow != nil {
-		inputs := placement.InputsFromRegistry(s.reg,
-			placement.Request{ModelID: req.Model, Strategy: strategy}, tgt)
+		preq := placement.Request{ModelID: req.Model, Strategy: strategy}
+		inputs := placement.InputsFromRegistry(s.reg, preq, tgt)
+		if s.measurements != nil {
+			mi := placement.BuildAdmissionInputs(s.measurements, s.proofs, preq, tgt)
+			placement.MergeRegistryGates(&mi, inputs)
+			inputs = mi
+		}
 		inputs.RequestID = fmt.Sprintf("chat-%d", time.Now().UnixNano())
 		s.admissionShadow.Record(placement.DecideAdmission(inputs, s.admissionMinSavingPct))
 	}
@@ -428,11 +456,28 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAdmissionShadow serves the recorded shadow admission decisions.
-// When shadow mode is OFF (the default) the endpoint answers 404, exactly
-// as if the experiment did not exist.
+// Access control, in order:
+//   - shadow OFF (default): 404, as if the experiment did not exist;
+//   - shadow ON but no admin key configured: 403, endpoint stays closed;
+//   - missing/wrong Bearer key: 401;
+//   - correct admin key: 200.
+//
+// The payload contains only measurements, generated request IDs and
+// gate states. It never contains chat content, API keys, node network
+// addresses or source IPs — those are never recorded in the first place.
 func (s *Server) handleAdmissionShadow(w http.ResponseWriter, r *http.Request) {
 	if s.admissionShadow == nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "admission shadow mode is disabled"})
+		return
+	}
+	if s.admissionAdminKey == "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "admission admin key not configured; endpoint closed"})
+		return
+	}
+	auth := r.Header.Get("Authorization")
+	key := strings.TrimPrefix(auth, "Bearer ")
+	if auth == key || key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(s.admissionAdminKey)) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin key required"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -13,8 +13,11 @@ package placement
 //     synthetic numbers are never presented as measurements.
 //   - ModeDistributedCandidate is a prediction, not evidence that joint
 //     execution works. Joint execution on DAIN is still unverified
-//     end-to-end (see docs/phase-b-proof.md), so the gates below require
-//     explicit proof inputs before a candidate is even suggested.
+//     end-to-end (see docs/phase-b-proof.md). Eligibility for a
+//     controlled experiment and production verification are separate
+//     tiers (see JointGates): a candidate can be experiment-eligible
+//     without being production-verified, and only the latter may ever
+//     feed a production policy.
 //
 // Integration: the API layer may record decisions in a ShadowRecorder for
 // observation. The recorder is OFF by default (nil) and the recorded
@@ -38,29 +41,58 @@ const (
 
 // Quantity is one numeric input with its provenance. Measured=false means
 // "we do not have a real measurement" — the value field is then ignored.
+// Source names where a measured value came from (e.g. "llama-server
+// timings", "service dial-back"); it is part of the evidence record.
 type Quantity struct {
 	Value    float64 `json:"value"`
 	Measured bool    `json:"measured"`
+	Source   string  `json:"source,omitempty"`
 }
 
 // MeasureQ marks v as a real measurement.
 func MeasureQ(v float64) Quantity { return Quantity{Value: v, Measured: true} }
 
+// MeasureQS marks v as a real measurement from the named source.
+func MeasureQS(v float64, source string) Quantity {
+	return Quantity{Value: v, Measured: true, Source: source}
+}
+
 // UnmeasuredQ marks a quantity as not measured.
 func UnmeasuredQ() Quantity { return Quantity{} }
 
-// JointGates are the proof preconditions for even considering joint
-// execution. They are booleans about verified facts, not measurements.
+// JointGates are verified facts about the joint path, split into two
+// tiers so that experimentation is not blocked by the absence of
+// production proof, while unproven joint execution can never be
+// presented as production-ready:
+//
+//   - Experimental eligibility needs RPCReachable and ModelReady only.
+//     An eligible decision is a candidate for a controlled experiment.
+//   - Production verification additionally needs JointExecutionProven:
+//     recorded evidence that joint execution actually offloaded work
+//     (both-sides compute evidence, e.g. a Phase B proof record).
+//
+// The shadow integration never assigns work from either tier; a future
+// production policy must require ProductionVerified, not mere
+// eligibility.
 type JointGates struct {
 	// RPCReachable: a coordinator→worker RPC connection has been verified.
 	// The service cannot verify this today (see DistributedGroup), so the
 	// registry-derived inputs always leave it false.
 	RPCReachable bool `json:"rpc_reachable"`
-	// ModelReady: coordinator and workers hold the model, ready to run.
+	// ModelReady: the coordinator AND every cohort worker hold the
+	// model, ready to run. InputsFromRegistry verifies all participants;
+	// a coordinator-only check is not sufficient.
 	ModelReady bool `json:"model_ready"`
-	// JointExecutionSafe: joint execution has been proven to actually
+	// JointExecutionProven: joint execution has been proven to actually
 	// offload (e.g. -ngl evidence on both sides), not merely to connect.
-	JointExecutionSafe bool `json:"joint_execution_safe"`
+	// This is the production tier gate; it is NOT required for
+	// experimental eligibility.
+	JointExecutionProven bool `json:"joint_execution_proven"`
+	// ProofEvidence references the proof record behind
+	// JointExecutionProven (e.g. a Phase B proof document ID). Empty
+	// means no evidence is claimed; DecideAdmission refuses to mark a
+	// decision production-verified without it.
+	ProofEvidence string `json:"proof_evidence,omitempty"`
 }
 
 // AdmissionInputs are the measurements one admission decision needs.
@@ -97,16 +129,43 @@ type AdmissionInputs struct {
 	Notes []string `json:"notes,omitempty"`
 }
 
+// MeasurementScopes defines exactly what each timing quantity covers,
+// so network and synchronization time are never double-counted: compute
+// times are pure compute, network time is priced once (RTT × rounds plus
+// the derived transfer time), and overhead is the residual only.
+var MeasurementScopes = map[string]string{
+	"best_single_ms": "end-to-end wall time of the request on the best single node (its prefill+decode), excluding client-side network",
+	"coordinator_ms": "pure compute time attributed to the coordinator in a joint run; excludes RPC transfer time and synchronization waits",
+	"worker_ms":      "pure compute time attributed to the worker in a joint run; excludes RPC transfer time and synchronization waits",
+	"rtt_ms":         "one round trip on the coordinator↔worker path; total latency is priced as rtt_ms × rtt_rounds and must not also be included in compute times",
+	"transfer_ms":    "derived once from payload_bytes × 8 / bandwidth; never also included in overhead_ms",
+	"overhead_ms":    "measured residual overhead (serialization, scheduling, engine coordination) excluding transfer time, which is computed separately",
+	"payload_bytes":  "actual tensor/activation bytes exchanged with the worker for this request",
+	"bandwidth_mbps": "throughput measured on the same coordinator↔worker path as rtt_ms",
+}
+
 // AdmissionDecision is the recorded outcome. Predictions are pointers so
 // that "not computed" (nil) is distinguishable from a real 0.
 type AdmissionDecision struct {
-	RequestID    string          `json:"request_id"`
-	ModelID      string          `json:"model_id,omitempty"`
-	Mode         string          `json:"mode"`
-	Reason       string          `json:"reason"`
-	Missing      []string        `json:"missing,omitempty"`
-	Inputs       AdmissionInputs `json:"inputs"`
-	MinSavingPct float64         `json:"min_saving_pct"`
+	RequestID    string            `json:"request_id"`
+	ModelID      string            `json:"model_id,omitempty"`
+	Mode         string            `json:"mode"`
+	Reason       string            `json:"reason"`
+	Missing      []string          `json:"missing,omitempty"`
+	Inputs       AdmissionInputs   `json:"inputs"`
+	MinSavingPct float64           `json:"min_saving_pct"`
+	Scopes       map[string]string `json:"scopes"`
+
+	// ExperimentalEligible: data is sufficient, the experimental gates
+	// (RPC reachable, model ready on all participants) hold, and the
+	// predicted saving clears the threshold. Eligible means "may be run
+	// as a controlled experiment" — nothing more.
+	ExperimentalEligible bool `json:"experimental_eligible"`
+	// ProductionVerified: the candidate is additionally backed by a
+	// joint-execution proof record. Only production-verified candidates
+	// may ever be assigned by a production policy. The shadow
+	// integration assigns nothing regardless.
+	ProductionVerified bool `json:"production_verified"`
 
 	PredictedSingleMs  *float64 `json:"predicted_single_ms,omitempty"`
 	PredictedJointMs   *float64 `json:"predicted_joint_ms,omitempty"`
@@ -132,6 +191,7 @@ func DecideAdmission(in AdmissionInputs, minSavingPct float64) AdmissionDecision
 		Mode:         ModeInsufficientData,
 		Inputs:       in,
 		MinSavingPct: minSavingPct,
+		Scopes:       MeasurementScopes,
 		Shadow:       true,
 	}
 
@@ -178,7 +238,10 @@ func DecideAdmission(in AdmissionInputs, minSavingPct float64) AdmissionDecision
 		return d
 	}
 
-	// Data is sufficient; the joint path still needs proven gates.
+	// Data is sufficient. Experimental eligibility needs the RPC path
+	// and model readiness on all participants — but NOT production
+	// proof; requiring proof before any experiment could run was a
+	// circular dependency. Production verification is tracked separately.
 	var closed []string
 	if !in.Gates.RPCReachable {
 		closed = append(closed, "rpc_reachable")
@@ -186,12 +249,9 @@ func DecideAdmission(in AdmissionInputs, minSavingPct float64) AdmissionDecision
 	if !in.Gates.ModelReady {
 		closed = append(closed, "model_ready")
 	}
-	if !in.Gates.JointExecutionSafe {
-		closed = append(closed, "joint_execution_safe")
-	}
 	if len(closed) > 0 {
 		d.Mode = ModeSingle
-		d.Reason = fmt.Sprintf("joint path not proven: %v", closed)
+		d.Reason = fmt.Sprintf("joint path not eligible even for experiment: %v unproven", closed)
 		return d
 	}
 
@@ -204,7 +264,15 @@ func DecideAdmission(in AdmissionInputs, minSavingPct float64) AdmissionDecision
 	d.PredictedSavingPct = fptr(saving)
 	if saving >= minSavingPct {
 		d.Mode = ModeDistributedCandidate
-		d.Reason = "predicted joint execution clears the minimum improvement threshold (prediction only — not execution evidence)"
+		d.ExperimentalEligible = true
+		// Production verification requires a proof record with an
+		// evidence reference; a bare boolean claim is not accepted.
+		d.ProductionVerified = in.Gates.JointExecutionProven && in.Gates.ProofEvidence != ""
+		if d.ProductionVerified {
+			d.Reason = "predicted joint execution clears the threshold and is backed by a joint-execution proof record (prediction + proof; shadow mode assigns nothing)"
+		} else {
+			d.Reason = "predicted joint execution clears the threshold — EXPERIMENT candidate only: joint execution is not production-verified and must not be assigned in production"
+		}
 	} else {
 		d.Mode = ModeSingle
 		d.Reason = "predicted joint execution does not improve enough over the best single node"
@@ -223,14 +291,14 @@ func DecideAdmission(in AdmissionInputs, minSavingPct float64) AdmissionDecision
 //     service↔node path, not coordinator↔worker; the note says so.
 //   - RPCReachable stays false: RpcAddr presence is a claim, and the
 //     service cannot verify coordinator→worker reachability.
-//   - JointExecutionSafe stays false: no joint-execution evidence source
-//     is wired into the service.
+//   - JointExecutionProven stays false: no proof-record source is
+//     wired into the service.
 func InputsFromRegistry(reg *registry.Registry, req Request, a *Assignment) AdmissionInputs {
 	in := AdmissionInputs{RequestID: "", ModelID: req.ModelID}
 	in.Notes = append(in.Notes,
 		"compute timings, bandwidth, payload and rtt_rounds have no measurement source in the service yet — left unmeasured on purpose",
 		"rpc_reachable is never inferred from a registered rpc_addr claim",
-		"joint_execution_safe has no evidence source wired into the service",
+		"joint_execution_proven has no proof-record source wired into the service",
 	)
 	if a != nil {
 		in.Notes = append(in.Notes, "actual assignment kind (unchanged by admission): "+a.Kind)
@@ -244,11 +312,40 @@ func InputsFromRegistry(reg *registry.Registry, req Request, a *Assignment) Admi
 			in.RTTMs = MeasureQ(float64(node.RTTMs))
 			in.Notes = append(in.Notes, "rtt_ms is the service dial-back RTT (service↔node), not a coordinator↔worker measurement")
 		}
-		if holdsModel(node, req.ModelID) {
-			in.Gates.ModelReady = true
+		ready, why := modelReadyAll(reg, req, a)
+		in.Gates.ModelReady = ready
+		if why != "" {
+			in.Notes = append(in.Notes, why)
 		}
 	}
 	return in
+}
+
+// modelReadyAll reports whether EVERY participant of the assignment
+// holds the model: the coordinator and, for a distributed assignment,
+// each cohort worker. A missing or unready participant closes the gate.
+// The second return value explains a closure ("" when ready or when
+// there is no coordinator to judge).
+func modelReadyAll(reg *registry.Registry, req Request, a *Assignment) (bool, string) {
+	if reg == nil || a == nil || a.NodeID == "" {
+		return false, ""
+	}
+	coord := reg.Get(a.NodeID)
+	if coord == nil {
+		return false, "model_ready closed: coordinator unknown to the registry"
+	}
+	if !holdsModel(coord, req.ModelID) {
+		return false, "model_ready closed: coordinator does not hold the model"
+	}
+	if a.Kind == "distributed" {
+		for _, m := range a.Cohort {
+			w := reg.Get(m.NodeID)
+			if w == nil || !holdsModel(w, req.ModelID) {
+				return false, "model_ready closed: cohort worker " + m.NodeID + " does not hold the model (or is unknown)"
+			}
+		}
+	}
+	return true, ""
 }
 
 // ShadowRecord pairs a decision with when it was recorded.

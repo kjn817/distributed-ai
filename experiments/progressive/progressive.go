@@ -49,8 +49,14 @@ type Quantized struct {
 var ErrUnsupportedBits = errors.New("progressive: bits must be 4, 8 or 16")
 
 // Quantize dispatches on bits: 4/8 symmetric integer quantization,
-// 16 per-element FP16 rounding.
+// 16 per-element FP16 rounding. Non-finite inputs are rejected at every
+// precision (the symmetric path also checks internally).
 func Quantize(x []float64, bits int) (Quantized, error) {
+	for _, v := range x {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return Quantized{}, fmt.Errorf("progressive: non-finite activation %v", v)
+		}
+	}
 	switch bits {
 	case 4, 8:
 		return QuantizeSymmetric(x, bits)

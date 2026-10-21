@@ -208,6 +208,87 @@ func TestCertificateSoundnessProperty(t *testing.T) {
 	}
 }
 
+// Failure cases: the machinery must DETECT bad outcomes, not hide them.
+//
+//  1. A real argmax mismatch at INT4 (quantization flips the winner)
+//     must surface as Match=false, Certified=false.
+//  2. An FP16 overflow (finite input saturating half precision) must
+//     error out instead of producing a certificate over Inf logits.
+//  3. A certified sample that disagreed with the reference would break
+//     the soundness invariant — RunExperiment errors on it internally;
+//     the property test above sweeps for it across random trials.
+func TestCertifyFailureCases(t *testing.T) {
+	// (1) x = [0.99, 1.0] quantizes at INT4 to [1, 1]; the tie breaks
+	// to row 0 while the reference winner is row 1.
+	W := [][]float64{{1, 0}, {0, 1}}
+	res, err := CertifyAffine(W, nil, []float64{0.99, 1.0}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Match {
+		t.Fatalf("expected a detected mismatch, got %+v", res)
+	}
+	if res.Certified {
+		t.Fatal("a mismatching sample must never be certified")
+	}
+	// Same input at FP16: represented precisely enough to match and
+	// certify — precision changes the outcome, as expected.
+	res16, err := CertifyAffine(W, nil, []float64{0.99, 1.0}, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res16.Match {
+		t.Fatalf("FP16 should match here: %+v", res16)
+	}
+
+	// (2) FP16 overflow.
+	if _, err := CertifyAffine(W, nil, []float64{1e30, 1.0}, 16); err == nil {
+		t.Fatal("FP16 overflow (1e30 -> Inf) must error, not certify")
+	}
+	// Non-finite inputs rejected at all precisions.
+	for _, bits := range []int{4, 8, 16} {
+		if _, err := CertifyAffine(W, nil, []float64{math.NaN(), 1.0}, bits); err == nil {
+			t.Errorf("bits %d: NaN input must error", bits)
+		}
+		if _, err := CertifyAffine(W, nil, []float64{math.Inf(1), 1.0}, bits); err == nil {
+			t.Errorf("bits %d: Inf input must error", bits)
+		}
+	}
+}
+
+func TestActivationSetValidation(t *testing.T) {
+	good := &ActivationSet{Kind: KindExactHidden, Source: "test", HiddenSize: 2,
+		Vectors: [][]float64{{1, 2}, {3, 4}}}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid set rejected: %v", err)
+	}
+	if !good.IsReal() {
+		t.Error("exact hidden set must count as real")
+	}
+	syn := &ActivationSet{Kind: KindSynthetic, Source: "gen", HiddenSize: 1, Vectors: [][]float64{{0}}}
+	if syn.IsReal() {
+		t.Error("synthetic set must not count as real")
+	}
+	bad := &ActivationSet{Kind: KindExactHidden, Source: "test", HiddenSize: 3,
+		Vectors: [][]float64{{1, 2}}}
+	if err := bad.Validate(); err == nil {
+		t.Error("width mismatch must fail validation")
+	}
+	// Round-trip through disk.
+	dir := t.TempDir()
+	p := dir + "/acts.json"
+	if err := SaveActivations(p, good); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadActivations(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Kind != good.Kind || len(back.Vectors) != 2 || back.Vectors[1][1] != 4 {
+		t.Fatalf("round-trip mismatch: %+v", back)
+	}
+}
+
 func TestReportHonestyFields(t *testing.T) {
 	rep, err := RunSynthetic(1, 10, 8, 4)
 	if err != nil {

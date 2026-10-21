@@ -24,7 +24,8 @@ func fullInputs() AdmissionInputs {
 		PayloadBytes:   MeasureQ(896),
 		BandwidthMbps:  MeasureQ(5),
 		OverheadMs:     MeasureQ(10),
-		Gates:          JointGates{RPCReachable: true, ModelReady: true, JointExecutionSafe: true},
+		// Experiment tier only: reachable + ready, no production proof.
+		Gates: JointGates{RPCReachable: true, ModelReady: true},
 	}
 }
 
@@ -46,6 +47,37 @@ func TestAdmissionJointCandidate(t *testing.T) {
 	}
 	if !d.Shadow {
 		t.Fatal("decision must be marked shadow")
+	}
+	// The circular dependency is gone: no production proof exists in
+	// these inputs, yet the candidate is experiment-eligible — and it
+	// must NOT be marked production-verified.
+	if !d.ExperimentalEligible {
+		t.Fatal("candidate must be experiment-eligible without production proof")
+	}
+	if d.ProductionVerified {
+		t.Fatal("candidate without proof record must not be production-verified")
+	}
+	if d.Scopes["coordinator_ms"] == "" || d.Scopes["transfer_ms"] == "" {
+		t.Fatal("decision must carry the measurement scope definitions")
+	}
+}
+
+func TestAdmissionProductionVerifiedRequiresEvidence(t *testing.T) {
+	// Boolean claim without an evidence reference: not verified.
+	in := fullInputs()
+	in.Gates.JointExecutionProven = true
+	d := DecideAdmission(in, 10)
+	if d.Mode != ModeDistributedCandidate || !d.ExperimentalEligible {
+		t.Fatalf("mode=%s eligible=%v, want candidate+eligible", d.Mode, d.ExperimentalEligible)
+	}
+	if d.ProductionVerified {
+		t.Fatal("proof boolean without evidence reference must not verify production")
+	}
+	// With an evidence reference: verified (still shadow; assigns nothing).
+	in.Gates.ProofEvidence = "phase-b-proof-2026-10-21"
+	d = DecideAdmission(in, 10)
+	if !d.ProductionVerified {
+		t.Fatal("proof + evidence reference must mark production-verified")
 	}
 }
 
@@ -155,16 +187,21 @@ func TestAdmissionInvalidThreshold(t *testing.T) {
 }
 
 func TestAdmissionEachGateClosedMeansSingle(t *testing.T) {
+	// Only the two EXPERIMENT gates close eligibility now. The
+	// production-proof gate no longer blocks a candidate (that was the
+	// circular dependency); it only controls ProductionVerified.
 	for _, closeGate := range []func(*JointGates){
 		func(g *JointGates) { g.RPCReachable = false },
 		func(g *JointGates) { g.ModelReady = false },
-		func(g *JointGates) { g.JointExecutionSafe = false },
 	} {
 		in := fullInputs()
 		closeGate(&in.Gates)
 		d := DecideAdmission(in, 10)
-		if d.Mode != ModeSingle || !strings.Contains(d.Reason, "not proven") {
-			t.Errorf("gate closed: mode=%s reason=%q, want single/not proven", d.Mode, d.Reason)
+		if d.Mode != ModeSingle || !strings.Contains(d.Reason, "not eligible") {
+			t.Errorf("gate closed: mode=%s reason=%q, want single/not eligible", d.Mode, d.Reason)
+		}
+		if d.ExperimentalEligible || d.ProductionVerified {
+			t.Errorf("gate closed: eligible=%v verified=%v, want both false", d.ExperimentalEligible, d.ProductionVerified)
 		}
 		if d.PredictedJointMs != nil {
 			t.Errorf("gate closed: joint prediction must not be produced")
@@ -195,8 +232,8 @@ func TestInputsFromRegistryHonestDefaults(t *testing.T) {
 	if in.Gates.RPCReachable {
 		t.Error("rpc_reachable must stay false even with an rpc_addr registered")
 	}
-	if in.Gates.JointExecutionSafe {
-		t.Error("joint_execution_safe must stay false: no evidence source")
+	if in.Gates.JointExecutionProven {
+		t.Error("joint_execution_proven must stay false: no proof-record source")
 	}
 	if in.BestSingleMs.Measured || in.BandwidthMbps.Measured || in.CoordinatorMs.Measured {
 		t.Error("compute/bandwidth inputs must stay unmeasured — the registry has none")
@@ -208,6 +245,41 @@ func TestInputsFromRegistryHonestDefaults(t *testing.T) {
 	joined := strings.Join(in.Notes, " ")
 	if !strings.Contains(joined, "dial-back") {
 		t.Error("notes must disclose the RTT path caveat")
+	}
+}
+
+// ModelReady must cover the coordinator AND every cohort worker:
+// a coordinator-only check would let an unready worker into a joint run.
+func TestInputsFromRegistryModelReadyBothSides(t *testing.T) {
+	mk := func(workerModels []string, registerWorker bool) AdmissionInputs {
+		reg := registry.New()
+		reg.Register(&registry.Node{ID: "coord", CPUCores: 4, Models: []string{"m1"}, LastHeartbeat: time.Now()})
+		if registerWorker {
+			reg.Register(&registry.Node{ID: "w1", Models: workerModels, LastHeartbeat: time.Now()})
+		}
+		a := &Assignment{Kind: "distributed", NodeID: "coord",
+			Cohort: []CohortMember{{NodeID: "w1", RpcAddr: "10.0.0.2:5000"}}}
+		return InputsFromRegistry(reg, Request{ModelID: "m1"}, a)
+	}
+	if in := mk([]string{"m1"}, true); !in.Gates.ModelReady {
+		t.Error("both hold the model: ModelReady must be true")
+	}
+	if in := mk([]string{"other"}, true); in.Gates.ModelReady {
+		t.Error("worker holds a different model: ModelReady must be false")
+	}
+	if in := mk(nil, true); in.Gates.ModelReady {
+		t.Error("worker holds nothing: ModelReady must be false")
+	}
+	if in := mk(nil, false); in.Gates.ModelReady {
+		t.Error("worker unknown to the registry: ModelReady must be false")
+	}
+	// Coordinator without the model closes the gate even if workers hold it.
+	reg := registry.New()
+	reg.Register(&registry.Node{ID: "coord", Models: []string{"other"}, LastHeartbeat: time.Now()})
+	reg.Register(&registry.Node{ID: "w1", Models: []string{"m1"}, LastHeartbeat: time.Now()})
+	a := &Assignment{Kind: "distributed", NodeID: "coord", Cohort: []CohortMember{{NodeID: "w1"}}}
+	if in := InputsFromRegistry(reg, Request{ModelID: "m1"}, a); in.Gates.ModelReady {
+		t.Error("coordinator lacks the model: ModelReady must be false")
 	}
 }
 

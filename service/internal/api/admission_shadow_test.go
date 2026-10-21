@@ -37,7 +37,7 @@ func TestAdmissionShadowRecordsWithoutChangingRouting(t *testing.T) {
 		rec := placement.NewShadowRecorder(8)
 		s := New(registry.New()).
 			WithEngine(&fakeEngine{url: backend.URL, ready: true}).
-			WithAdmissionShadow(rec, 10)
+			WithAdmissionShadow(rec, 10, "test-admin-key")
 		return s, rec
 	}
 	chat := func(s *Server) *httptest.ResponseRecorder {
@@ -72,11 +72,26 @@ func TestAdmissionShadowRecordsWithoutChangingRouting(t *testing.T) {
 			respOn.Code, respOn.Body.String(), respOff.Code, respOff.Body.String())
 	}
 
-	// The endpoint now serves the recorded decisions as JSON.
+	// The endpoint serves the recorded decisions as JSON — but only to
+	// the admin key holder.
+	unauth := httptest.NewRecorder()
+	on.Routes().ServeHTTP(unauth, httptest.NewRequest("GET", "/v1/experiments/admission/shadow", nil))
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("shadow endpoint without key: expected 401, got %d", unauth.Code)
+	}
 	rec2 := httptest.NewRecorder()
-	on.Routes().ServeHTTP(rec2, httptest.NewRequest("GET", "/v1/experiments/admission/shadow", nil))
+	areq := httptest.NewRequest("GET", "/v1/experiments/admission/shadow", nil)
+	areq.Header.Set("Authorization", "Bearer test-admin-key")
+	on.Routes().ServeHTTP(rec2, areq)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("shadow endpoint: expected 200, got %d", rec2.Code)
+	}
+	// The payload must not leak request content or network details:
+	// none of these fields may appear anywhere in the response.
+	for _, banned := range []string{`"messages"`, `"content"`, `"prompt"`, `"api_key"`, `"source_ip"`, `"addrs"`, `"rpc_addr"`} {
+		if strings.Contains(rec2.Body.String(), banned) {
+			t.Fatalf("shadow payload leaks %s: %s", banned, rec2.Body.String())
+		}
 	}
 	var payload struct {
 		Enabled   bool `json:"enabled"`
@@ -95,11 +110,45 @@ func TestAdmissionShadowRecordsWithoutChangingRouting(t *testing.T) {
 	}
 }
 
+// Access control matrix for the shadow endpoint: wrong key is rejected,
+// and shadow ON without a configured admin key keeps the endpoint closed
+// even for requests that present some key.
+func TestAdmissionShadowAuthMatrix(t *testing.T) {
+	rec := placement.NewShadowRecorder(8)
+	withKey := New(registry.New()).WithAdmissionShadow(rec, 10, "secret-key")
+	get := func(s *Server, auth string) int {
+		req := httptest.NewRequest("GET", "/v1/experiments/admission/shadow", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		w := httptest.NewRecorder()
+		s.Routes().ServeHTTP(w, req)
+		return w.Code
+	}
+	if c := get(withKey, ""); c != http.StatusUnauthorized {
+		t.Errorf("no header: %d, want 401", c)
+	}
+	if c := get(withKey, "Bearer wrong"); c != http.StatusUnauthorized {
+		t.Errorf("wrong key: %d, want 401", c)
+	}
+	if c := get(withKey, "secret-key"); c != http.StatusUnauthorized {
+		t.Errorf("missing Bearer prefix handling must not accept raw key: %d, want 401", c)
+	}
+	if c := get(withKey, "Bearer secret-key"); c != http.StatusOK {
+		t.Errorf("correct key: %d, want 200", c)
+	}
+
+	noKey := New(registry.New()).WithAdmissionShadow(placement.NewShadowRecorder(8), 10, "")
+	if c := get(noKey, "Bearer anything"); c != http.StatusForbidden {
+		t.Errorf("no admin key configured: %d, want 403 (endpoint closed)", c)
+	}
+}
+
 // A failed placement (no capacity) records nothing: shadow observation
 // only covers requests that were actually placed by the existing policy.
 func TestAdmissionShadowSkipsUnplacedRequests(t *testing.T) {
 	rec := placement.NewShadowRecorder(8)
-	s := New(registry.New()).WithAdmissionShadow(rec, 10)
+	s := New(registry.New()).WithAdmissionShadow(rec, 10, "k")
 	resp := httptest.NewRecorder()
 	s.Routes().ServeHTTP(resp, httptest.NewRequest("POST", "/v1/chat/completions",
 		strings.NewReader(`{"model":"m","messages":[]}`)))

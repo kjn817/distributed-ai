@@ -48,11 +48,42 @@ go run ./experiments/progressive/cmd/progressive-demo
 go run ./experiments/progressive/cmd/progressive-demo \
   -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf -list
 
-# run with real weights from a tensor (activations stay synthetic —
-# no activation-capture path exists yet, and the report says so)
+# real weights + synthetic activations
 go run ./experiments/progressive/cmd/progressive-demo \
   -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf -tensor output.weight
 ```
+
+Real hidden activations are collected without modifying llama.cpp:
+`cmd/hidden-collector` uses the server's `/v1/embeddings` endpoint
+(start the server with `--embedding --pooling mean`). For a prompt of
+exactly one token, pooling is the identity, so the returned vector is
+the final hidden state — the exact input of `output.weight`. The
+collector verifies the token count from the response usage and skips
+multi-token prompts; datasets are kind-labeled
+(`exact_hidden_single_token` vs `pooled_multi_token` vs `synthetic`)
+and the demo refuses pooled data unless `-allow-pooled` is passed.
+Datasets themselves are experiment data and are not committed to the
+repository.
+
+```sh
+# collect real hidden activations (separate llama-server instance with
+# --embedding --pooling mean), then real weights + real activations
+go run ./experiments/progressive/cmd/hidden-collector \
+  -engine-url http://127.0.0.1:18100 \
+  -prompts "Hello,The,Water,Fire,Paris,king,queen,cat" \
+  -model qwen2.5-0.5b-instruct -out /tmp/hidden.json
+go run ./experiments/progressive/cmd/progressive-demo \
+  -gguf models/qwen2.5-0.5b-instruct-q4_k_m.gguf -tensor output.weight \
+  -activations /tmp/hidden.json -full-vocab
+```
+
+Measured on 2026-10-21 (19 single-token prompts, full 151,936-row
+vocabulary): INT4 match 26.3% / certified 0%, INT8 match 100% /
+certified 0%, FP16 match 100% / certified 78.9%. Real activations are
+far less forgiving than Gaussian ones (compare the synthetic runs in
+the docs) — and at vocabulary scale the pairwise bound is too
+pessimistic to certify INT8 despite a perfect match rate. Both facts
+are properties of the method on real data, recorded as-is.
 
 ## Origin
 
