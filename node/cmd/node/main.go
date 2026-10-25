@@ -45,7 +45,8 @@ import (
 )
 
 // version is overridden at release build time:
-//   go build -ldflags "-X main.version=v0.9-alpha" ./node/cmd/node
+//
+//	go build -ldflags "-X main.version=v0.9-alpha" ./node/cmd/node
 var version = "dev"
 
 func printLocalInfo(info protocol.ResourceInfo) {
@@ -93,6 +94,7 @@ func printLocalInfo(info protocol.ResourceInfo) {
 
 func main() {
 	connectAddr := flag.String("connect", "", "peer multiaddress to connect to")
+	relayAddr := flag.String("relay", "", "DAIN relay multiaddress (…/p2p/<relayPeerID>): enables AutoRelay reservation + hole punching so this node is reachable behind NAT")
 	apiURL := flag.String("api", "", "service base URL to register/heartbeat to (e.g. http://oracle:8080)")
 	cpuShare := flag.Int("cpu", 10, "CPU share percent")
 	gpuShare := flag.Int("gpu", 0, "GPU share percent: 0=disabled, 100=full GPU (explicit consent). Partial values (1-99) are NOT supported — no vendor API can enforce fractional GPU compute.")
@@ -151,11 +153,17 @@ func main() {
 		return
 	}
 
-	h, err := p2p.NewWithPort(priv, *p2pPort)
+	h, err := p2p.NewWithConfig(priv, p2p.Config{RelayAddr: *relayAddr},
+		fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", *p2pPort),
+		fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", *p2pPort),
+	)
 	if err != nil {
 		panic(err)
 	}
 	defer h.Close()
+	if *relayAddr != "" {
+		fmt.Println("Relay configured:", *relayAddr, "(AutoRelay + hole punching enabled)")
+	}
 
 	hostname, _ := os.Hostname()
 	cpuModel, physicalCores, logicalCores, ramGB := hardware.DetectHardware()
@@ -207,9 +215,16 @@ func main() {
 		return out
 	}
 
-	addrs := make([]string, 0, len(h.Addrs()))
-	for _, a := range h.Addrs() {
-		addrs = append(addrs, a.String())
+	// hostAddrs reads the host's CURRENT addresses on every call.
+	// A startup snapshot can never contain relay addresses learned
+	// later (AutoRelay reservations complete asynchronously), so all
+	// reporting goes through this live lookup.
+	hostAddrs := func() []string {
+		out := make([]string, 0, len(h.Addrs()))
+		for _, a := range h.Addrs() {
+			out = append(out, a.String())
+		}
+		return out
 	}
 
 	// Chunk serving: always on — a node holding a model file serves its
@@ -401,7 +416,7 @@ func main() {
 					libMu.Unlock()
 					fmt.Println("Model materialized:", mid, "->", path)
 					// Re-register so the service lists us as a holder.
-					_ = reporter.Register(context.Background(), *apiURL, localInfo, addrs, modelsList(), getRpcAddr())
+					_ = reporter.Register(context.Background(), *apiURL, localInfo, hostAddrs(), modelsList(), getRpcAddr())
 				},
 			})
 			h.SetStreamHandler(jobprotocol.JobProtocol, ex.HandleStream)
@@ -428,12 +443,12 @@ func main() {
 			modelFiles[modelID] = path
 			libMu.Unlock()
 			fmt.Println("Replicated:", modelID, "->", path)
-			_ = reporter.Register(context.Background(), *apiURL, localInfo, addrs, modelsList(), getRpcAddr())
+			_ = reporter.Register(context.Background(), *apiURL, localInfo, hostAddrs(), modelsList(), getRpcAddr())
 		}
 		go reporter.Run(context.Background(), reporter.Config{
 			APIURL:     *apiURL,
 			Info:       localInfo,
-			Addrs:      addrs,
+			AddrsFn:    hostAddrs,
 			Models:     modelsList,
 			ChunkBytes: chunkSrv.BytesServed,
 			ChunkReceived: func() []reporter.ReceivedFrom {
@@ -471,11 +486,20 @@ func main() {
 
 	if *connectAddr != "" {
 		fmt.Println("Connecting to:", *connectAddr)
-		if err := p2p.ConnectAndSend(context.Background(), h, *connectAddr, localInfo); err != nil {
-			fmt.Println("Connection failed:", err)
-		} else {
-			fmt.Println("✅ P2P CONNECTED and resource info sent")
-		}
+		// Retry in the background with backoff: a briefly unavailable
+		// peer or relay must not give the exchange up after one try.
+		// V2 (ACK + identity verification) is preferred; legacy peers
+		// fall back to fire-and-forget and the log says so.
+		go func() {
+			res, err := p2p.ConnectWithRetry(ctx, h, *connectAddr, localInfo, 30*time.Second,
+				func(format string, args ...any) { fmt.Printf(format+"\n", args...) })
+			if err != nil {
+				fmt.Println("Connection failed:", err)
+				return
+			}
+			fmt.Printf("✅ P2P CONNECTED and resource info sent (acked=%v fallback=%v kind=%s)\n",
+				res.ACKed, res.FellBack, res.Kind)
+		}()
 	}
 
 	fmt.Println()

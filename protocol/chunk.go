@@ -59,6 +59,28 @@ func ConnectPeer(ctx context.Context, h host.Host, peerID string, addrs []string
 		if err != nil {
 			continue
 		}
+		// Relayed (circuit) addresses are complete as they are: they
+		// already end in the destination /p2p/<peerID>, and the TCP
+		// port in them belongs to the RELAY — collecting it for the
+		// source-IP fallback would dial the wrong machine entirely.
+		// Validate the embedded peer ID and dial the address as-is.
+		if strings.Contains(a, "/p2p-circuit") {
+			ai, err := peer.AddrInfoFromP2pAddr(maddr)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if ai.ID != pid {
+				lastErr = fmt.Errorf("circuit address peer %s does not match target %s", ai.ID, pid)
+				continue
+			}
+			if err := h.Connect(ctx, *ai); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+			continue
+		}
 		tcpPorts = append(tcpPorts, tcpPortsOf(maddr)...)
 		if isUnspecified(maddr) {
 			continue

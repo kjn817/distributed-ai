@@ -1,0 +1,81 @@
+DAIN experiment/phase-a-relay — local prototype evidence (2026-10-21, isolated local VM)
+Command: go test ./node/internal/p2p/ -count=1 -v (cache disabled)
+Setup: loopback only; the public-form loopback alias 45.33.10.20/32 was bound to lo in the same
+shell for TestAutoRelayAdvertisesCircuitAddr (AutoRelay discards private/documentation addresses).
+No Oracle process, public port, firewall, or Cloudflare setting was touched.
+Result: all 12 tests PASS, including TestRelayProcessSmoke (separate dain-relay / relay-smoke
+processes, both ResourceInfo directions, rogue denial, relay restart recovery) and
+TestWSSRelayPath (self-signed local TLS only).
+
+=== RUN   TestConnectAndSendLoopback
+--- PASS: TestConnectAndSendLoopback (0.02s)
+=== RUN   TestConnectAndSendBadAddr
+--- PASS: TestConnectAndSendBadAddr (0.01s)
+=== RUN   TestHandleResourceStreamGarbage
+Failed to read resource info: invalid character 'h' in literal true (expecting 'r')
+--- PASS: TestHandleResourceStreamGarbage (0.52s)
+=== RUN   TestRelayEndToEnd
+    relay_test.go:219: node reachable through the relay: AutoRelay reservation is in effect
+    relay_test.go:245: relayed ResourceInfo delivered, ACKed, identity verified, classified relayed on both ends
+    relay_test.go:271: service -> NAT-ed node relayed exchange delivered with ACK (dial-back direction)
+    relay_test.go:293: direct ResourceInfo delivered and classified direct — distinct from relayed
+--- PASS: TestRelayEndToEnd (5.06s)
+=== RUN   TestRelayACLDeniesRogue
+    relay_test.go:332: rogue reservation denied: reservation error: status: PERMISSION_DENIED reason: reservation failed err: %!s(<nil>)
+    relay_test.go:340: rogue circuit connect denied: connect failed: failed to dial: failed to dial 12D3KooWBweJ9wQgYbVGc24oaT81sr6hvy1RaUz6qMZN2z3Q9Qdi: all dials failed
+          * [/ip4/127.0.0.1/tcp/33707/p2p/12D3KooWQQR4Lz1BcyKVEaMzVLp646LiBW2jqWaUMosTypviMNMx/p2p-circuit] error opening relay circuit: PERMISSION_DENIED (202)
+--- PASS: TestRelayACLDeniesRogue (0.02s)
+=== RUN   TestResourceV2RejectsSpoofedPeerID
+resource v2: REJECTED info from 12D3KooWFehZgVaGJJmPSVMoWmDBrL6W2YkM6s6sc78JzCsNYNsE claiming peer_id 12D3KooWSNrHeJUYEj3qAtbj8CrCs9Lwisg4aSnvfexsrb7XBiSb
+    relay_test.go:395: spoofed PeerID rejected in ACK and never delivered
+--- PASS: TestResourceV2RejectsSpoofedPeerID (0.02s)
+=== RUN   TestV2FallsBackToLegacyV1
+    relay_test.go:445: v0.10-alpha (V1-only) peer received info via fallback; sender reports unacknowledged
+--- PASS: TestV2FallsBackToLegacyV1 (0.01s)
+=== RUN   TestRelayedStreamLimits
+    relay_test.go:497: 512KB relayed stream: OK with DAIN limits (1h / 1GiB)
+    relay_test.go:510: 512KB relayed stream under stock limits fails as expected: send failed: stream reset (remote): code: 0x0: transport error: stream reset: connection closed: stream reset (remote): code: 0x0: transport error: stream reset by remote, error code: 0
+--- PASS: TestRelayedStreamLimits (0.08s)
+=== RUN   TestConnectWithRetryRecovers
+    relay_test.go:585: connect retry recovered from late-appearing target and delivered with ACK
+--- PASS: TestConnectWithRetryRecovers (5.01s)
+=== RUN   TestAutoRelayAdvertisesCircuitAddr
+    relay_test.go:629: advertised circuit address: /ip4/45.33.10.20/tcp/42369/p2p/12D3KooWHcwzTAeYnmFBMxDgfkFZTFwFKUCCEsbAp6mhC3KHK8me/p2p-circuit
+--- PASS: TestAutoRelayAdvertisesCircuitAddr (0.26s)
+=== RUN   TestWSSRelayPath
+    relay_test.go:667: relay WSS dial address: /ip4/127.0.0.1/tcp/38705/wss/p2p/12D3KooWQCvytKiYaR5UjzQ3LnJVJF4eCWtUJmxR8VYAMstTgAk9
+    relay_test.go:703: WSS relay path: reservation + relayed ResourceInfo + ACK all over TLS/WebSocket
+--- PASS: TestWSSRelayPath (0.04s)
+=== RUN   TestRelayProcessSmoke
+    smoke_test.go:143: child: dain-relay up
+    smoke_test.go:143: child: Peer ID: 12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT
+    smoke_test.go:154: relay: /ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT
+    smoke_test.go:159: child: SMOKE: READY 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH
+    smoke_test.go:165: child: SMOKE: READY 12D3KooWEyyVPSoBZsmgcYgSnMqpXPpQpFLMrrBhexpsSNJ2EkK5
+    smoke_test.go:166: child: SMOKE: connect: sent resource info (acked=true fallback=false kind=relayed) after 1 attempt(s)
+    smoke_test.go:166: child: SMOKE: SENT acked=true fallback=false kind=relayed
+    smoke_test.go:170: child: SMOKE: GOT from=12D3KooWEyyVPSoBZsmgcYgSnMqpXPpQpFLMrrBhexpsSNJ2EkK5 name=node-a
+    smoke_test.go:174: node -> relay -> svc: ResourceInfo delivered, V2 ACK returned, kind=relayed
+    smoke_test.go:177: child: SMOKE: REPLIED acked=true kind=relayed
+    smoke_test.go:178: child: SMOKE: GOT from=12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH name=svc
+    smoke_test.go:182: svc -> relay -> node: reply delivered with ACK
+    smoke_test.go:194: rogue reservation denied by the allowlist relay
+    smoke_test.go:143: child: dain-relay up
+    smoke_test.go:143: child: Peer ID: 12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT
+    smoke_test.go:206: child: SMOKE: READY 12D3KooWEyyVPSoBZsmgcYgSnMqpXPpQpFLMrrBhexpsSNJ2EkK5
+    smoke_test.go:206: child: SMOKE: connect: attempt 1 failed: connect failed: failed to dial: failed to dial 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH: all dials failed
+    smoke_test.go:206: child:   * [/ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT/p2p-circuit] error opening relay circuit: NO_RESERVATION (204) (retry in 1s)
+    smoke_test.go:206: child: SMOKE: connect: attempt 2 failed: connect failed: failed to dial: failed to dial 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH: all dials failed
+    smoke_test.go:206: child:   * [/ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT/p2p-circuit] dial backoff (retry in 2s)
+    smoke_test.go:206: child: SMOKE: connect: attempt 3 failed: connect failed: failed to dial: failed to dial 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH: all dials failed
+    smoke_test.go:206: child:   * [/ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT/p2p-circuit] dial backoff (retry in 4s)
+    smoke_test.go:206: child: SMOKE: connect: attempt 4 failed: connect failed: failed to dial: failed to dial 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH: all dials failed
+    smoke_test.go:206: child:   * [/ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT/p2p-circuit] error opening relay circuit: NO_RESERVATION (204) (retry in 5s)
+    smoke_test.go:206: child: SMOKE: connect: attempt 5 failed: connect failed: failed to dial: failed to dial 12D3KooWQzGxJ2rEZCuWzhdBpuBn9pG1X5rfvSiHeVWxLmHE94jH: all dials failed
+    smoke_test.go:206: child:   * [/ip4/127.0.0.1/tcp/39509/p2p/12D3KooWFdF73fmUUxktwuwQUspLRQ7y6Vk6rrZzaAgw6cMNuHmT/p2p-circuit] dial backoff (retry in 5s)
+    smoke_test.go:206: child: SMOKE: connect: sent resource info (acked=true fallback=false kind=relayed) after 6 attempt(s)
+    smoke_test.go:206: child: SMOKE: SENT acked=true fallback=false kind=relayed
+    smoke_test.go:210: relay restart: peers recovered, ResourceInfo delivered with ACK again
+--- PASS: TestRelayProcessSmoke (24.00s)
+PASS
+ok  	distributed-ai/node/internal/p2p	35.075s

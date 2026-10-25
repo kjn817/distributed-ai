@@ -199,7 +199,12 @@ type Config struct {
 	APIURL string
 	Info   protocol.ResourceInfo
 	Addrs  []string
-	Models func() []string // fresh list on every (re-)register
+	// AddrsFn, when set, supplies the node's CURRENT libp2p addresses
+	// at every (re-)register instead of the static Addrs snapshot.
+	// This is what lets relay-learned /p2p-circuit addresses reach the
+	// service: a startup snapshot can never contain them.
+	AddrsFn func() []string
+	Models  func() []string // fresh list on every (re-)register
 	// ChunkBytes reports cumulative chunk payload bytes served (for
 	// transfer metering); nil = not serving chunks.
 	ChunkBytes func() int64
@@ -215,6 +220,15 @@ type Config struct {
 	// OnAssign receives model IDs the service wants replicated; the node
 	// fetches them in the background.
 	OnAssign func(modelIDs []string)
+}
+
+// addrs resolves the address list for a (re-)register: live lookup
+// when AddrsFn is set, else the static snapshot.
+func (c Config) addrs() []string {
+	if c.AddrsFn != nil {
+		return c.AddrsFn()
+	}
+	return c.Addrs
 }
 
 // chunkBytes is nil-safe.
@@ -239,7 +253,7 @@ func (c Config) chunkReceived() []ReceivedFrom {
 // 404 — it restarted and forgot us — the node re-registers with the
 // current models list instead of heartbeating into the void forever.
 func Run(ctx context.Context, cfg Config) {
-	if err := Register(ctx, cfg.APIURL, cfg.Info, cfg.Addrs, cfg.Models(), rpcAddrOf(cfg)); err != nil {
+	if err := Register(ctx, cfg.APIURL, cfg.Info, cfg.addrs(), cfg.Models(), rpcAddrOf(cfg)); err != nil {
 		cfg.OnErr(fmt.Errorf("initial register: %w", err))
 		return
 	}
@@ -253,7 +267,7 @@ func Run(ctx context.Context, cfg Config) {
 			assign, err := Heartbeat(ctx, cfg)
 			if err != nil {
 				if IsNotFound(err) {
-					if rerr := Register(ctx, cfg.APIURL, cfg.Info, cfg.Addrs, cfg.Models(), rpcAddrOf(cfg)); rerr != nil {
+					if rerr := Register(ctx, cfg.APIURL, cfg.Info, cfg.addrs(), cfg.Models(), rpcAddrOf(cfg)); rerr != nil {
 						cfg.OnErr(fmt.Errorf("re-register: %w", rerr))
 					} else {
 						cfg.OnErr(errors.New("re-registered with service after heartbeat 404"))
