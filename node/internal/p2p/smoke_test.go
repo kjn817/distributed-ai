@@ -111,6 +111,22 @@ func TestRelayProcessSmoke(t *testing.T) {
 	}
 	waitLine := func(c *child, substr string, timeout time.Duration) string {
 		t.Helper()
+		// First check lines an earlier wait already scanned: the svc
+		// reply can reach the node (and print its GOT) while the
+		// node's own SENT wait is still scanning, so a later wait for
+		// that GOT must find it in history instead of timing out
+		// waiting for a second copy that will never come. Each waited
+		// substring is expected exactly once per child, so a history
+		// hit is the line this wait is for, not a stale one.
+		c.mu.Lock()
+		for _, line := range c.seen {
+			if strings.Contains(line, substr) {
+				c.mu.Unlock()
+				t.Logf("child (seen): %s", line)
+				return line
+			}
+		}
+		c.mu.Unlock()
 		deadline := time.Now().Add(timeout)
 		for {
 			c.mu.Lock()

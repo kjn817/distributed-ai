@@ -9,6 +9,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"strconv"
@@ -21,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	libp2pprotocol "github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	ma "github.com/multiformats/go-multiaddr"
@@ -445,16 +448,20 @@ func TestV2FallsBackToLegacyV1(t *testing.T) {
 	t.Log("v0.10-alpha (V1-only) peer received info via fallback; sender reports unacknowledged")
 }
 
+// testBulkProtocol is a test-only raw stream: the receiver counts the
+// bytes it actually got. It exists so the relay's per-circuit data
+// limit can be probed with real bulk traffic — ResourceInfo itself is
+// capped at 64 KiB by the application layer (see security_test.go) and
+// must never be the bulk probe.
+const testBulkProtocol = libp2pprotocol.ID("/distributed-ai/test-bulk/1")
+
 // TestRelayedStreamLimits: a ~512 KB stream over the relay succeeds
 // with the DAIN limits and fails under the stock circuit defaults
 // (128 KB per direction) — the limit raise is functional, not cosmetic.
+// A 20 MiB stream must also fail under the DAIN limits: the per-circuit
+// cap is 16 MiB, so excessive traffic is cut off at the relay.
 func TestRelayedStreamLimits(t *testing.T) {
-	bigInfo := func(id peer.ID) protocol.ResourceInfo {
-		info := sampleInfo(id)
-		info.CPUModel = strings.Repeat("x", 512<<10)
-		return info
-	}
-	run := func(t *testing.T, resources *relayv2.Resources) error {
+	run := func(t *testing.T, resources *relayv2.Resources, size int) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		relayKey, _ := keyAndID(t)
@@ -470,6 +477,13 @@ func TestRelayedStreamLimits(t *testing.T) {
 		got := make(chan receipt, 1)
 		svc := newSvcHost(t, svcKey, got)
 		defer svc.Close()
+		// The bulk receiver counts bytes on a dedicated test protocol.
+		bytesGot := make(chan int64, 1)
+		svc.SetStreamHandler(testBulkProtocol, func(s network.Stream) {
+			defer s.Close()
+			n, _ := io.Copy(io.Discard, s)
+			bytesGot <- n
+		})
 		reserveWithRelay(t, ctx, svc, tcpAddrOf(t, relay))
 		node, err := NewWithAddrs(nodeKey, "/ip4/127.0.0.1/tcp/0")
 		if err != nil {
@@ -487,14 +501,43 @@ func TestRelayedStreamLimits(t *testing.T) {
 			return err
 		}
 		svcViaRelay := tcpAddrOf(t, relay) + "/p2p-circuit/p2p/" + svcID.String()
-		_, err = ConnectAndSendV2(ctx, node, svcViaRelay, bigInfo(nodeID))
-		return err
+		pi, err := peer.AddrInfoFromP2pAddr(mustMA(t, svcViaRelay))
+		if err != nil {
+			return err
+		}
+		// Connect first: NewStream dials by Peer ID from the peerstore,
+		// and only Connect records the circuit address there.
+		if err := node.Connect(ctx, *pi); err != nil {
+			return fmt.Errorf("connect via relay: %w", err)
+		}
+		stream, err := node.NewStream(network.WithAllowLimitedConn(ctx, "test-bulk"), pi.ID, testBulkProtocol)
+		if err != nil {
+			return fmt.Errorf("open bulk stream: %w", err)
+		}
+		defer stream.Close()
+		payload := make([]byte, size)
+		for i := range payload {
+			payload[i] = 'x'
+		}
+		if _, err := stream.Write(payload); err != nil {
+			return fmt.Errorf("write bulk: %w", err)
+		}
+		_ = stream.CloseWrite()
+		select {
+		case n := <-bytesGot:
+			if n != int64(size) {
+				return fmt.Errorf("receiver got %d of %d bytes", n, size)
+			}
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for bulk delivery")
+		}
 	}
 
-	if err := run(t, nil); err != nil {
+	if err := run(t, nil, 512<<10); err != nil {
 		t.Fatalf("512KB stream with DAIN relay limits: %v", err)
 	}
-	t.Log("512KB relayed stream: OK with DAIN limits (1h / 1GiB)")
+	t.Log("512KB relayed stream: OK with DAIN limits (1h / 16 MiB)")
 
 	// The genuine circuit-v2 stock defaults: only the per-connection
 	// Limit differs from DAIN's (2 minutes / 128 KB).
@@ -504,10 +547,17 @@ func TestRelayedStreamLimits(t *testing.T) {
 		MaxReservations: 128, MaxCircuits: 16, BufferSize: 2048,
 		MaxReservationsPerPeer: 4, MaxReservationsPerIP: 8, MaxReservationsPerASN: 32,
 	}
-	if err := run(t, stock); err == nil {
+	if err := run(t, stock, 512<<10); err == nil {
 		t.Fatal("512KB stream unexpectedly succeeded under stock 128KB relay limits")
 	} else {
 		t.Logf("512KB relayed stream under stock limits fails as expected: %v", err)
+	}
+
+	// Excessive traffic: 20 MiB exceeds the DAIN per-circuit cap (16 MiB).
+	if err := run(t, nil, 20<<20); err == nil {
+		t.Fatal("20MB stream unexpectedly succeeded under the DAIN 16 MiB per-circuit cap")
+	} else {
+		t.Logf("20MB stream under DAIN limits fails as expected: %v", err)
 	}
 }
 

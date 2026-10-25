@@ -1,0 +1,83 @@
+DAIN Phase A relay security hardening — test evidence
+Date: 2026-10-25 (Asia/Seoul). Environment: isolated Linux VM, loopback only.
+Branch: experiment/phase-a-relay (base main 8d2333a6, previous head 0c762aaf).
+Loopback alias 45.33.10.20/32 bound to lo for the AutoRelay advertisement test.
+
+--- commands ---
+go build ./...            -> exit 0
+go vet ./...              -> exit 0
+go test -count=1 -timeout 10m ./... -> exit 0 (all packages ok)
+go test -count=1 -timeout 10m -v ./node/internal/p2p/ ./node/cmd/relay/ -> exit 0
+
+--- full suite (go test -count=1 ./...) ---
+ok  	distributed-ai/engine	0.039s
+ok  	distributed-ai/experiments/progressive	3.928s
+ok  	distributed-ai/limits	0.007s
+ok  	distributed-ai/node/cmd/relay	0.042s
+ok  	distributed-ai/node/internal/chunks	6.648s
+ok  	distributed-ai/node/internal/executor	0.199s
+ok  	distributed-ai/node/internal/hardware	0.010s
+ok  	distributed-ai/node/internal/identity	0.033s
+ok  	distributed-ai/node/internal/materialize	0.164s
+ok  	distributed-ai/node/internal/p2p	46.294s
+ok  	distributed-ai/node/internal/protocol	0.034s
+ok  	distributed-ai/node/internal/reporter	1.267s
+ok  	distributed-ai/service/cmd/rpc-probe	0.008s
+ok  	distributed-ai/service/internal/api	0.024s
+ok  	distributed-ai/service/internal/credit	0.011s
+ok  	distributed-ai/service/internal/dispatch	0.149s
+ok  	distributed-ai/service/internal/metrics	0.005s
+ok  	distributed-ai/service/internal/model	5.482s
+ok  	distributed-ai/service/internal/p2pnet	0.371s
+ok  	distributed-ai/service/internal/placement	0.007s
+ok  	distributed-ai/service/internal/quest	0.009s
+ok  	distributed-ai/service/internal/registry	0.005s
+ok  	distributed-ai/service/internal/replica	0.012s
+
+--- verbose p2p + relay tests ---
+--- PASS: TestConnectAndSendLoopback (0.05s)
+--- PASS: TestConnectAndSendBadAddr (0.04s)
+--- PASS: TestHandleResourceStreamGarbage (0.54s)
+--- PASS: TestRelayEndToEnd (5.20s)
+--- PASS: TestRelayACLDeniesRogue (0.08s)
+--- PASS: TestResourceV2RejectsSpoofedPeerID (0.05s)
+--- PASS: TestV2FallsBackToLegacyV1 (0.03s)
+--- PASS: TestRelayedStreamLimits (0.54s)
+--- PASS: TestConnectWithRetryRecovers (5.02s)
+--- PASS: TestAutoRelayAdvertisesCircuitAddr (0.28s)
+--- PASS: TestWSSRelayPath (0.07s)
+--- PASS: TestRelayDefaultDeniesEmptyAllowlist (0.00s)
+--- PASS: TestRelayAllowAllRequiresExplicitOptIn (0.03s)
+--- PASS: TestDefaultRelayLimits (0.00s)
+--- PASS: TestResourceV2RejectsOversizedMessage (0.55s)
+--- PASS: TestResourceV2RateLimitsAbnormalRequests (0.58s)
+--- PASS: TestRelayProcessSmoke (28.01s)
+--- PASS: TestParseAllowlistIDs (0.00s)
+--- PASS: TestLoadAllowlistFile (0.00s)
+
+--- security test detail (from verbose run) ---
+resource v2: REJECTED info from 12D3KooWQai4zpDDoasoXfXhkjHTGRwicvtM8SF3ecD7ZJaL2L9p: peer_id_mismatch
+    security_test.go:30: empty allowlist refused as expected: relay allowlist is empty: refusing to start an open relay (pass AllowAll explicitly for isolated local tests only)
+    security_test.go:45: explicit AllowAll relay starts (local-test-only mode)
+    security_test.go:79: relay caps: 32 circuits x 16 MiB = 512 MiB total; 512 reservations, 4 per peer, 64 per IP
+resource v2: REJECTED info from 12D3KooWBhbHhy3R6k4qSLPCKdoKkiXchkFq2Mdens1mYnFAEiNd: message_too_large
+    security_test.go:112: oversized (131072 bytes) ResourceInfo rejected, never delivered
+resource v2: REJECTED info from 12D3KooWDH8W8JqCRKPDCZFKAazishBi6Zh8RcXGZVTzrXe7qRBF: rate_limited
+resource v2: REJECTED info from 12D3KooWDH8W8JqCRKPDCZFKAazishBi6Zh8RcXGZVTzrXe7qRBF: rate_limited
+    security_test.go:178: rate limit enforced: 10 accepted, 2 rate_limited, second peer unaffected, 11 delivered
+
+--- smoke test stability ---
+TestRelayProcessSmoke re-run 3x after the harness fix: PASS 32.32s, PASS 31.79s, PASS 30.07s.
+Note: one verbose re-run before the harness fix failed the smoke test (40.56s, timeout
+waiting for SMOKE: GOT) — a pre-existing test-harness race, not a product regression:
+the svc reply can reach the node before the node's own SENT wait finishes, and the
+cursor-based waiter never looked back at already-scanned lines. Fixed by making
+waitLine check already-seen history first (smoke_test.go). Product code unchanged by that fix.
+
+--- deadlock found by the attack tests (fixed in this change) ---
+First implementation of the 64 KiB cap used io.ReadAll on the stream. A libp2p stream
+stays open while the sender waits for the ACK, so ReadAll waited for an EOF that only
+arrives after the reply — the receiver deadlocked itself. TestResourceV2RateLimits
+hung for the full 10-minute test timeout on this bug. Fixed with decodeCapped:
+json.Decoder reads exactly one value and returns (the framing), with a byte counter
+detecting overflow. After the fix both security tests pass in ~0.6s each.

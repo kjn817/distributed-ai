@@ -16,13 +16,21 @@ an external-node test.
 ### Relay / bootstrap process — `node/cmd/relay`
 
 - Circuit Relay v2 service with DAIN limits: reservation TTL 1 hour,
-  per-circuit limit 1 hour / 1 GiB, 512 reservations. The stock limits
-  (2 minutes / 128 KiB) are for signalling and are tested separately
-  below.
+  per-circuit limit 1 hour / 16 MiB, 512 reservations, 32 circuits,
+  max 4 reservations per peer and 64 per IP (structural server-wide
+  cap: 32 x 16 MiB = 512 MiB). The stock limits (2 minutes / 128 KiB)
+  are for signalling and are tested separately below.
+  (2026-10-25 security review: per-circuit data was 1 GiB — one peer
+  could burn 32 GiB across 32 circuits. Now 16 MiB, still wide margin
+  over ResourceInfo traffic.)
 - AutoNAT service so clients can obtain reachability information.
 - Peer ID allowlist ACL for both reservation and circuit connection.
-  An empty allowlist allows everyone and the binary prints a warning;
-  that mode is for local tests only.
+  Default deny (2026-10-25 security review): an empty allowlist
+  refuses to start the relay. Allow-all exists only as an explicit
+  `--allow-all` opt-in for isolated local tests. Member IDs can come
+  from `--allow` or `--allow-file` (one Peer ID per line); the file is
+  the revocation surface — remove an ID and restart the relay (see
+  `docs/security-architecture.md` §5).
 - Persistent relay identity under a data directory (default
   `~/.distributed-ai-relay`), so a restart keeps the same Peer ID.
 - Plain TCP/QUIC listeners and an optional WSS listener from an
@@ -65,6 +73,14 @@ an external-node test.
 - `ConnectAndSendV2` reports `ACKed`, `FellBack`, and `Kind`
   separately. A V1-only peer receives the information by fallback and
   the result is explicitly unacknowledged.
+- Security hardening (2026-10-25, see `docs/security-architecture.md`
+  and `node/internal/p2p/security_test.go`): one ResourceInfo message
+  is capped at 64 KiB and one ACK at 4 KiB — oversized input is
+  rejected (`message_too_large`) and never delivered. Each peer may
+  send at most 10 ResourceInfo messages per minute (V1+V2 share one
+  limiter per host); excess is rejected (`rate_limited`) and logged
+  with the authenticated Peer ID. All rejections (decode failure,
+  oversize, rate limit, identity mismatch) are logged.
 
 ### Dynamic reporting
 

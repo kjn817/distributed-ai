@@ -18,9 +18,11 @@ import (
 
 // AllowlistACL gates relay access by Peer ID. The DAIN relay is not a
 // public relay: only known network members may reserve slots, and
-// circuits may only terminate at members. An EMPTY allowlist allows
-// everyone — that mode exists for isolated local experiments and must
-// never be used on a public relay.
+// circuits may only terminate at members.
+//
+// Default deny (2026-10-25): an empty allowlist denies everyone.
+// Allow-all exists only as an explicit, local-test-only opt-in
+// (RelayConfig.AllowAll) and must never be used on a public relay.
 type AllowlistACL struct {
 	allowed map[peer.ID]bool
 }
@@ -57,8 +59,13 @@ type RelayConfig struct {
 	// AnnounceAddrs, when set, overrides the addresses the relay
 	// advertises (its public DNS/IP form in production).
 	AnnounceAddrs []string
-	// Allowlist of member Peer IDs (empty = allow all, local test only).
+	// Allowlist of member Peer IDs. Empty means DENY ALL unless
+	// AllowAll is set (see below).
 	Allowlist []peer.ID
+	// AllowAll explicitly opts into allow-all mode. It exists only for
+	// isolated local experiments; a public relay must never set it.
+	// Default: false (default deny).
+	AllowAll bool
 	// TLSConfig enables WSS listeners (cert from a file pair in the
 	// caller, or a self-signed test config). Nil = no WSS.
 	TLSConfig *tls.Config
@@ -71,16 +78,24 @@ type RelayConfig struct {
 // Default relay limits. The circuit-v2 defaults (2 minutes, 128 KB
 // per connection) are sized for signaling and would reset a
 // ResourceInfo stream mid-flight on a slow path, so the DAIN relay
-// raises them deliberately: 1 hour and 1 GiB per relayed connection
-// are generous for control traffic and small streams. Bulk chunk
-// transfer over relay is NOT authorized by these numbers — that is a
-// separate policy decision (see docs/phase-a-relay-minimal-plan.md).
+// raises them deliberately — but only as far as control traffic needs.
+// Per-circuit data is 16 MiB (was 1 GiB before the 2026-10-25 security
+// review: 1 GiB per circuit let one peer burn 32 GiB across the 32
+// allowed circuits). 16 MiB still covers ResourceInfo (a few KB) and
+// the 512 KiB stream probe with wide margin. Bulk chunk transfer over
+// relay is NOT authorized by these numbers — that is a separate policy
+// decision (see docs/phase-a-relay-minimal-plan.md).
+//
+// Structural server-wide cap implied by these numbers:
+// MaxCircuits (32) x per-circuit Data (16 MiB) = 512 MiB of relayed
+// data at most. There is no separate bandwidth meter; the cap is
+// enforced by the circuit count and the per-circuit limit together.
 func defaultRelayResources() relayv2.Resources {
 	return relayv2.Resources{
 		ReservationTTL: time.Hour,
 		Limit: &relayv2.RelayLimit{
 			Duration: time.Hour,
-			Data:     1 << 30,
+			Data:     16 << 20,
 		},
 		MaxReservations:        512,
 		MaxCircuits:            32,
@@ -94,6 +109,13 @@ func defaultRelayResources() relayv2.Resources {
 // for the network. It speaks no DAIN application protocol and holds no
 // service state: it is pure connectivity infrastructure.
 func NewRelayHost(priv crypto.PrivKey, cfg RelayConfig) (host.Host, error) {
+	// Default deny: an empty allowlist must never silently become an
+	// open relay. The caller has to opt in explicitly (AllowAll) for
+	// isolated local experiments, and the CLI refuses that on a public
+	// host unless --allow-all is passed.
+	if len(cfg.Allowlist) == 0 && !cfg.AllowAll {
+		return nil, fmt.Errorf("relay allowlist is empty: refusing to start an open relay (pass AllowAll explicitly for isolated local tests only)")
+	}
 	acl := NewAllowlistACL(cfg.Allowlist)
 	resources := defaultRelayResources()
 	if cfg.Resources != nil {

@@ -10,7 +10,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -136,9 +138,83 @@ func NewWithConfig(priv crypto.PrivKey, cfg Config, addrs ...string) (host.Host,
 	if err != nil {
 		return nil, err
 	}
-	h.SetStreamHandler(protocol.ResourceProtocol, HandleResourceStream)
-	h.SetStreamHandler(protocol.ResourceProtocolV2, NewResourceStreamV2Handler(cfg.OnResourceInfo))
+	// V1 and V2 share one rate limiter per host: an attacker must not
+	// be able to dodge the V2 limit by spamming the legacy protocol.
+	v1Handler, v2Handler := newResourceHandlers(cfg.OnResourceInfo)
+	h.SetStreamHandler(protocol.ResourceProtocol, v1Handler)
+	h.SetStreamHandler(protocol.ResourceProtocolV2, v2Handler)
 	return h, nil
+}
+
+// resourceRateLimiter is a per-peer sliding-window limiter for
+// ResourceInfo streams. Legitimate traffic is one message per connect
+// plus reconnects — a handful per minute at most. Anything above the
+// limit is abnormal and is rejected + logged, never delivered.
+type resourceRateLimiter struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	hits   map[peer.ID][]time.Time
+}
+
+func newResourceRateLimiter(limit int, window time.Duration) *resourceRateLimiter {
+	return &resourceRateLimiter{limit: limit, window: window, hits: make(map[peer.ID][]time.Time)}
+}
+
+// resourceRateLimit is the default: 10 ResourceInfo messages per peer
+// per minute, across V1 and V2 combined (shared limiter).
+const resourceRateLimit = 10
+const resourceRateWindow = time.Minute
+
+func (l *resourceRateLimiter) Allow(id peer.ID) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-l.window)
+	hits := l.hits[id]
+	kept := hits[:0]
+	for _, t := range hits {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= l.limit {
+		l.hits[id] = kept
+		return false
+	}
+	l.hits[id] = append(kept, now)
+	return true
+}
+
+// countReader counts the bytes actually pulled from the stream.
+type countReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// decodeCapped decodes ONE JSON value from r with a hard size cap.
+// It returns tooLarge=true when the peer sent more than maxBytes —
+// the caller must reject, never trust a truncated value.
+//
+// NOTE: io.ReadAll must never be used here. A libp2p stream stays open
+// while the sender waits for the ACK, so ReadAll would wait for an EOF
+// that only arrives after the reply — a deadlock the receiver created
+// for itself (found by the 2026-10-25 rate-limit test, which hung for
+// the full 10-minute test timeout on this exact bug). json.Decoder
+// reads exactly one value and returns, which is the framing.
+func decodeCapped(r io.Reader, maxBytes int, v any) (bool, error) {
+	cr := &countReader{r: r}
+	err := json.NewDecoder(io.LimitReader(cr, int64(maxBytes)+1)).Decode(v)
+	if cr.n > int64(maxBytes) {
+		return true, nil
+	}
+	return false, err
 }
 
 // ConnKind classifies a connection as "relayed" when its remote
@@ -155,27 +231,53 @@ func ConnKind(c network.Conn) string {
 	return "direct"
 }
 
-// NewResourceStreamV2Handler builds the V2 stream handler (exported
-// for tools and tests that need a custom receive callback on a host
-// they construct themselves). The identity rule is enforced here,
-// before any callback: the payload's self-declared PeerID must equal
-// the connection's authenticated RemotePeer, or the info is rejected
-// in the ACK and never delivered.
-func NewResourceStreamV2Handler(onInfo func(info protocol.ResourceInfo, from peer.ID)) network.StreamHandler {
-	return func(s network.Stream) {
+// decodeResourceInfo reads one ResourceInfo with the hard size cap.
+// It returns tooLarge=true when the peer exceeded MaxResourceInfoBytes;
+// the caller must reject, never decode a truncated prefix.
+func decodeResourceInfo(s network.Stream) (protocol.ResourceInfo, bool, error) {
+	var info protocol.ResourceInfo
+	tooLarge, err := decodeCapped(s, protocol.MaxResourceInfoBytes, &info)
+	if err != nil {
+		return info, false, err
+	}
+	if tooLarge {
+		return info, true, nil
+	}
+	return info, false, nil
+}
+
+// newResourceHandlers builds the V1+V2 stream handlers for one host,
+// sharing a single per-peer rate limiter: an attacker must not be able
+// to dodge the V2 limit by spamming the legacy protocol. Enforcement
+// order on every stream is: rate limit, then size cap, then (V2 only)
+// the identity rule. Every rejection is logged with the authenticated
+// RemotePeer and the reason; rejected info is never delivered.
+func newResourceHandlers(onInfo func(info protocol.ResourceInfo, from peer.ID)) (network.StreamHandler, network.StreamHandler) {
+	limiter := newResourceRateLimiter(resourceRateLimit, resourceRateWindow)
+	v2 := func(s network.Stream) {
 		defer s.Close()
 		remote := s.Conn().RemotePeer()
-		var info protocol.ResourceInfo
 		ack := protocol.ResourceAck{PeerID: remote.String()}
-		if err := json.NewDecoder(s).Decode(&info); err != nil {
-			ack.Error = "decode_failed"
+		reject := func(reason string) {
+			ack.Error = reason
 			_ = json.NewEncoder(s).Encode(ack)
+			fmt.Printf("resource v2: REJECTED info from %s: %s\n", remote, reason)
+		}
+		if !limiter.Allow(remote) {
+			reject("rate_limited")
+			return
+		}
+		info, tooLarge, err := decodeResourceInfo(s)
+		if tooLarge {
+			reject("message_too_large")
+			return
+		}
+		if err != nil {
+			reject("decode_failed")
 			return
 		}
 		if info.PeerID != remote.String() {
-			ack.Error = "peer_id_mismatch"
-			_ = json.NewEncoder(s).Encode(ack)
-			fmt.Printf("resource v2: REJECTED info from %s claiming peer_id %s\n", remote, info.PeerID)
+			reject("peer_id_mismatch")
 			return
 		}
 		ack.OK = true
@@ -186,19 +288,61 @@ func NewResourceStreamV2Handler(onInfo func(info protocol.ResourceInfo, from pee
 			fmt.Printf("resource v2: accepted info from %s (%s connection)\n", remote, ConnKind(s.Conn()))
 		}
 	}
+	v1 := func(s network.Stream) {
+		defer s.Close()
+		remote := s.Conn().RemotePeer()
+		if !limiter.Allow(remote) {
+			fmt.Printf("resource v1: REJECTED info from %s: rate_limited\n", remote)
+			return
+		}
+		info, tooLarge, err := decodeResourceInfo(s)
+		if tooLarge {
+			fmt.Printf("resource v1: REJECTED info from %s: message_too_large\n", remote)
+			return
+		}
+		if err != nil {
+			fmt.Println("Failed to read resource info:", err)
+			return
+		}
+		printResourceInfo(info)
+	}
+	return v1, v2
+}
+
+// NewResourceStreamV2Handler builds the V2 stream handler (exported
+// for tools and tests that need a custom receive callback on a host
+// they construct themselves). The identity rule is enforced here,
+// before any callback: the payload's self-declared PeerID must equal
+// the connection's authenticated RemotePeer, or the info is rejected
+// in the ACK and never delivered. It carries its own rate limiter;
+// hosts built by NewWithConfig share one limiter across V1+V2 instead.
+func NewResourceStreamV2Handler(onInfo func(info protocol.ResourceInfo, from peer.ID)) network.StreamHandler {
+	_, v2 := newResourceHandlers(onInfo)
+	return v2
 }
 
 // HandleResourceStream receives a peer's ResourceInfo and prints it.
 // Same output format as the original runtime.
+//
+// Deprecated: kept only for existing external callers. It applies the
+// message size cap but has no rate limiter, because it carries no
+// per-host state. Hosts built by NewWithConfig do not use it — they use
+// newResourceHandlers, which rate-limits V1 and V2 together.
 func HandleResourceStream(s network.Stream) {
 	defer s.Close()
-
-	var info protocol.ResourceInfo
-	if err := json.NewDecoder(s).Decode(&info); err != nil {
+	info, tooLarge, err := decodeResourceInfo(s)
+	if tooLarge {
+		fmt.Printf("resource v1: REJECTED info from %s: message_too_large\n", s.Conn().RemotePeer())
+		return
+	}
+	if err != nil {
 		fmt.Println("Failed to read resource info:", err)
 		return
 	}
+	printResourceInfo(info)
+}
 
+func printResourceInfo(info protocol.ResourceInfo) {
 	fmt.Println()
 	fmt.Println("================================")
 	fmt.Println(" Resource info received")
@@ -299,8 +443,12 @@ func ConnectAndSendV2(ctx context.Context, h host.Host, addrStr string, info pro
 		return res, fmt.Errorf("send failed: %w", err)
 	}
 	var ack protocol.ResourceAck
-	if err := json.NewDecoder(stream).Decode(&ack); err != nil {
+	ackTooLarge, err := decodeCapped(stream, protocol.MaxResourceAckBytes, &ack)
+	if err != nil {
 		return res, fmt.Errorf("read ack failed: %w", err)
+	}
+	if ackTooLarge {
+		return res, fmt.Errorf("read ack failed: ack exceeds %d bytes", protocol.MaxResourceAckBytes)
 	}
 	if !ack.OK {
 		return res, fmt.Errorf("receiver rejected info: %s", ack.Error)

@@ -22,6 +22,17 @@ const ResourceProtocol = protocol.ID("/distributed-ai/resource/0.4.0")
 // the exchange as unacknowledged.
 const ResourceProtocolV2 = protocol.ID("/distributed-ai/resource/0.5.0")
 
+// Message size caps (security, 2026-10-25). A legitimate ResourceInfo is a
+// few kilobytes of short strings; anything larger is abuse, not data.
+// The relay's per-circuit limit is a transport backstop, not a substitute:
+// the application layer must refuse oversized input before decoding it.
+const (
+	// MaxResourceInfoBytes caps one ResourceInfo message (V1 and V2).
+	MaxResourceInfoBytes = 64 << 10
+	// MaxResourceAckBytes caps one ResourceAck frame.
+	MaxResourceAckBytes = 4 << 10
+)
+
 // ResourceAck is the V2 reply frame, written by the receiver after it
 // has read (and judged) the ResourceInfo.
 type ResourceAck struct {
