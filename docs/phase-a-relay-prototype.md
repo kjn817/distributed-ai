@@ -42,10 +42,12 @@ an external-node test.
   `protocol.ConnectPeer` validates the destination Peer ID embedded in
   a circuit address and does not reuse the relay's TCP port as if it
   belonged to the destination.
-- Streams over relayed connections use `network.WithUseTransient`.
-  This is mandatory: without it, `NewStream` waits for a
-  non-transient connection until the context expires, even though the
-  circuit connection and identify exchange are healthy.
+- Streams over relayed connections use `network.WithAllowLimitedConn`
+  (2026-10-25: renamed from deprecated `network.WithUseTransient`;
+  same context key, identical behaviour). This is mandatory: without
+  it, `NewStream` waits for a non-transient connection until the
+  context expires, even though the circuit connection and identify
+  exchange are healthy.
 - Connection classification is taken from the connection that the
   stream actually rides: any `/p2p-circuit` remote address is
   `relayed`; otherwise `direct`.

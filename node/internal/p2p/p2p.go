@@ -266,11 +266,14 @@ func ConnectAndSendV2(ctx context.Context, h host.Host, addrStr string, info pro
 		return res, fmt.Errorf("connect failed: %w", err)
 	}
 	// Relayed connections are TRANSIENT in libp2p: a stream over one
-	// only opens when the context opts in with WithUseTransient.
+	// only opens when the context opts in with WithAllowLimitedConn.
 	// Without it NewStream silently waits for a non-transient
 	// connection until the context deadline — discovered the hard way
 	// (relay_test.go reproduces both the hang and the fix).
-	stream, err := h.NewStream(network.WithUseTransient(ctx, string(protocol.ResourceProtocolV2)), pi.ID, protocol.ResourceProtocolV2)
+	// (2026-10-25: WithUseTransient is deprecated in go-libp2p
+	// v0.50.0; WithAllowLimitedConn sets the same context key, so
+	// this is a rename-only change with identical behaviour.)
+	stream, err := h.NewStream(network.WithAllowLimitedConn(ctx, string(protocol.ResourceProtocolV2)), pi.ID, protocol.ResourceProtocolV2)
 	if err != nil {
 		// libp2p phrases negotiation failure as "protocols not
 		// supported: [<id>]" (older builds: "protocol not supported").
