@@ -204,8 +204,9 @@ Round 3 establishes the verified path (no llama.cpp modification):
 
 ### RPC path measurement (isolated loopback) + admission connection
 
-`service/cmd/rpc-probe` measures a real ggml-rpc joint run locally:
-process-CPU compute per role, TCP-handshake RTT, bulk loopback
+`service/cmd/rpc-probe` measures a real ggml-rpc run locally:
+process CPU time per role (diagnostic only — see the reporting
+corrections below), TCP-handshake RTT, bulk loopback
 bandwidth, loopback byte deltas (tensor + protocol), protocol-known
 round count, residual overhead, weights hash, layer placement
 (-ngl 99). Findings, recorded as-is:
@@ -229,6 +230,50 @@ round count, residual overhead, weights hash, layer placement
 - Path mixing is prevented by the `NetworkPath` equality rule in
   `BuildAdmissionInputs`; every record here carries
   `local-loopback-ggml-rpc (NOT WAN evidence)`.
+
+### Round 3 reporting corrections (2026-10-21, later the same day)
+
+The reporting rules for this experiment were tightened after the
+round-3 measurements. These corrections supersede the labels — not
+the raw observations — in the section above:
+
+- **Process CPU time is not pure compute.** `Measurement` now carries
+  a separate `process_cpu_ms` quantity. `rpc-probe` records its
+  `/proc` utime+stime deltas there and leaves `compute_ms` and
+  `overhead_ms` unmeasured; `BuildAdmissionInputs` deliberately
+  ignores `process_cpu_ms`. Legacy rpc-probe files fed back through
+  `-predict-from` are relabeled the same way before use, so the old
+  CPU-as-compute values cannot re-enter a decision.
+- **The `-t 1` “closure” is an accounting identity, not a compute
+  proof.** wall = coordinator CPU + worker CPU + network estimate +
+  residual closes arithmetically over process-CPU deltas. It does not
+  establish pure per-role compute, and the residual is no longer
+  recorded as measured overhead. Consequently the round-3 loopback
+  `distributed_candidate` — produced under the superseded labels — is
+  **withdrawn as a prediction result**: the collection pipeline was
+  demonstrated, but with corrected semantics rpc-probe records alone
+  yield `insufficient_data` (missing pure coordinator/worker compute
+  and overhead), which is the honest state.
+- **No same-run prediction error.** A decision built from a run
+  cannot be scored against that same run (the residual construction
+  makes the figure circular). `rpc-probe` now emits
+  `prediction_error_pct: null` with the reason for same-run use.
+  Cross-run errors are emitted only when the comparison is verified
+  controlled: same prompt (by SHA-256), same token cap,
+  `cache_prompt=false` in both runs, and the same actual
+  generated-token count. The probe now sends `cache_prompt: false`
+  and records all four conditions in its summary. Pre-correction
+  summaries lack these fields and are therefore incomparable — the
+  historical 213% / 117% figures remain methodology notes about
+  uncontrolled loopback variance, not validated model errors.
+- **`-ngl 99` is full offload, not joint layer compute.** All layers
+  sit on the single RPC worker. It is not evidence that a coordinator
+  CPU and a worker GPU split layers or jointly computed anything, and
+  summaries now carry `joint_compute_verified: false` with that
+  interpretation stated.
+- **Contextual hidden state remains unverified.** Nothing in this
+  correction promotes it: it stays `hidden_candidate_unverified`
+  under the strict top-20 criterion.
 
 ### Phase A networking
 

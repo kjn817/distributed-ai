@@ -1,0 +1,51 @@
+DAIN experiment/adaptive-inference — ROUND 3 REPORTING CORRECTIONS evidence (2026-10-21, local VM)
+Scope of this run: local combined working tree (adaptive-inference changes plus the separate phase-a-relay working files,
+because this workspace is a file tree, not a git checkout). The correction-specific packages are
+service/internal/placement and service/cmd/rpc-probe; both report ok below.
+Cache policy: go test -count=1 (cache disabled). TMPDIR was pointed at a disk-backed directory after
+an earlier identical build failed while linking into the 512 MiB /tmp tmpfs ("no space left on device");
+the rerun below is the canonical result: build_exit=0, vet_exit=0, test_exit=0.
+Corrections covered: process_cpu_ms separated from compute_ms (TestProcessCPUTimeIsNotCompute),
+same-run prediction error suppressed and cross-run comparisons gated on controlled conditions
+(TestControlledComparisonAcceptsOnlyControlledPairs in service/cmd/rpc-probe).
+
+$ go build ./...
+build_exit=0
+$ go vet ./...
+vet_exit=0
+$ go test -count=1 ./...
+ok  	distributed-ai/engine	0.020s
+ok  	distributed-ai/experiments/progressive	1.002s
+?   	distributed-ai/experiments/progressive/cmd/hidden-collector	[no test files]
+?   	distributed-ai/experiments/progressive/cmd/hidden-verify	[no test files]
+?   	distributed-ai/experiments/progressive/cmd/progressive-demo	[no test files]
+ok  	distributed-ai/limits	0.003s
+?   	distributed-ai/node/cmd/node	[no test files]
+?   	distributed-ai/node/cmd/relay	[no test files]
+?   	distributed-ai/node/cmd/relay-smoke	[no test files]
+ok  	distributed-ai/node/internal/chunks	2.249s
+ok  	distributed-ai/node/internal/executor	0.094s
+ok  	distributed-ai/node/internal/hardware	0.008s
+ok  	distributed-ai/node/internal/identity	0.010s
+ok  	distributed-ai/node/internal/materialize	0.056s
+ok  	distributed-ai/node/internal/p2p	34.328s
+ok  	distributed-ai/node/internal/protocol	0.004s
+ok  	distributed-ai/node/internal/reporter	1.263s
+?   	distributed-ai/node/internal/rpcworker	[no test files]
+?   	distributed-ai/protocol	[no test files]
+?   	distributed-ai/service/cmd/admission-probe	[no test files]
+?   	distributed-ai/service/cmd/chunk-model	[no test files]
+ok  	distributed-ai/service/cmd/rpc-probe	0.004s
+?   	distributed-ai/service/cmd/server	[no test files]
+ok  	distributed-ai/service/internal/api	0.041s
+ok  	distributed-ai/service/internal/credit	0.003s
+?   	distributed-ai/service/internal/dashboard	[no test files]
+ok  	distributed-ai/service/internal/dispatch	0.061s
+ok  	distributed-ai/service/internal/metrics	0.003s
+ok  	distributed-ai/service/internal/model	1.348s
+ok  	distributed-ai/service/internal/p2pnet	0.077s
+ok  	distributed-ai/service/internal/placement	0.004s
+ok  	distributed-ai/service/internal/quest	0.006s
+ok  	distributed-ai/service/internal/registry	0.003s
+ok  	distributed-ai/service/internal/replica	0.005s
+test_exit=0

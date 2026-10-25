@@ -8,10 +8,16 @@
 // What it measures, and how:
 //   - wall_ms: probe wall clock around one chat completion that the
 //     coordinator executes with ALL layers on the RPC worker (-ngl 99).
-//   - compute_ms per role: process CPU time (utime+stime from
+//     That is full offload to ONE worker — not split-layer CPU+GPU
+//     joint computation, and this probe never reports it as such.
+//   - process_cpu_ms per role: process CPU time (utime+stime from
 //     /proc/<pid>/stat) consumed by the coordinator and worker
-//     processes during the request window. CPU time is the pure-compute
-//     proxy the scopes demand (it excludes network waits by nature).
+//     processes during the request window. This is CPU consumption,
+//     NOT pure compute: it can include spin and scheduler effects and
+//     can exceed wall time. It is recorded in ProcessCPUMs only.
+//   - compute_ms: this probe has no scope-valid pure-compute source
+//     per role, so it leaves ComputeMs unmeasured. Admission therefore
+//     degrades honestly instead of pricing a CPU delta as compute.
 //   - rtt_ms: median TCP connect time to the RPC port (loopback
 //     handshake), labeled as such.
 //   - bandwidth_mbps: bulk TCP throughput over a probe-owned loopback
@@ -21,14 +27,19 @@
 //     overhead + the probe's own small HTTP), labeled as such.
 //   - rtt_rounds: 1 (prompt graph) + generated tokens (one ggml-rpc
 //     graph compute per decode step) — protocol-known for ggml-rpc.
-//   - overhead_ms: residual = wall − coordinator CPU − worker CPU −
-//     (RTT×rounds + transfer time). If the residual is not positive it
-//     stays unmeasured rather than going negative.
+//   - residual_after_process_cpu_ms: a diagnostic arithmetic residual
+//     (wall − coordinator CPU − worker CPU − network estimate). It is
+//     NOT recorded as measured overhead: its inputs are process CPU
+//     deltas, so it is not a scope-valid overhead measurement.
 //
 // Outputs: coordinator/worker Measurement JSON files and a summary
-// JSON with the shadow decision and the prediction-vs-actual error.
-// The summary is explicit that an experimental candidate on loopback
-// is not a production verification and not WAN evidence.
+// JSON with the shadow decision. A prediction-vs-actual error is
+// reported ONLY for a cross-run comparison whose inputs came from a
+// prior run AND whose run conditions are verified to match (same
+// prompt hash, same token cap, prompt cache disabled, same actual
+// generated-token count). A same-run figure would be circular — the
+// decision was built from that very run — so it is reported as null
+// with the reason, never as 0% "prediction success".
 //
 // Usage:
 //
@@ -39,6 +50,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -153,6 +166,63 @@ type chatResp struct {
 	} `json:"timings"`
 }
 
+// promptHash identifies the exact prompt text in a run summary
+// without recording the prompt itself.
+func promptHash(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:])
+}
+
+func summaryString(m map[string]any, key string) (string, bool) {
+	v, ok := m[key].(string)
+	return v, ok && v != ""
+}
+
+func summaryFloat(m map[string]any, key string) (float64, bool) {
+	v, ok := m[key].(float64)
+	return v, ok
+}
+
+func summaryBool(m map[string]any, key string) (bool, bool) {
+	v, ok := m[key].(bool)
+	return v, ok
+}
+
+// controlledComparison decides whether a prior run's prediction may
+// honestly be compared with the current run's actual time. Repeated
+// experiments are comparable only when the run conditions were
+// controlled: identical prompt (by hash), identical token cap,
+// prompt caching disabled in BOTH runs, and the same number of
+// actually generated tokens. Anything missing or different makes the
+// comparison invalid — no error percentage may be reported.
+func controlledComparison(prior, current map[string]any) (bool, string) {
+	pHash, ok := summaryString(prior, "prompt_sha256")
+	if !ok {
+		return false, "prior run summary has no prompt_sha256 — its run conditions cannot be verified"
+	}
+	cHash, _ := summaryString(current, "prompt_sha256")
+	if pHash != cHash {
+		return false, "prompt differs between the prior and current runs"
+	}
+	pMax, okP := summaryFloat(prior, "max_tokens_requested")
+	cMax, okC := summaryFloat(current, "max_tokens_requested")
+	if !okP || !okC || pMax != cMax {
+		return false, "max_tokens_requested differs or is unrecorded between runs"
+	}
+	for name, m := range map[string]map[string]any{"prior": prior, "current": current} {
+		cp, ok := summaryBool(m, "cache_prompt")
+		if !ok || cp {
+			return false, name + " run did not record cache_prompt=false — cache conditions were not controlled"
+		}
+	}
+	pGen, okP := summaryFloat(prior, "gen_tokens")
+	cGen, okC := summaryFloat(current, "gen_tokens")
+	if !okP || !okC || pGen != cGen {
+		return false, "actual generated token counts differ or are unrecorded between runs"
+	}
+	return true, "prior-run prediction compared under controlled conditions (same prompt hash, token cap, cache_prompt=false, generated-token count)"
+}
+
 func main() {
 	coordURL := flag.String("coordinator-url", "http://127.0.0.1:18099", "coordinator llama-server base URL")
 	rpcPort := flag.Int("rpc-port", 19000, "ggml-rpc-server port")
@@ -200,9 +270,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "lo bytes:", err)
 		os.Exit(1)
 	}
+	// cache_prompt=false is part of the experiment controls: a repeat
+	// run must not silently reuse the coordinator's prompt cache and
+	// call the difference prediction error (or accuracy).
 	body, _ := json.Marshal(map[string]any{
 		"model": *modelID, "messages": []map[string]string{{"role": "user", "content": *prompt}},
-		"max_tokens": *maxTokens,
+		"max_tokens": *maxTokens, "cache_prompt": false,
 	})
 	client := &http.Client{Timeout: 10 * time.Minute}
 	start := time.Now()
@@ -235,52 +308,59 @@ func main() {
 	residual := wall - coordCPU - workerCPU - networkMs
 
 	now := time.Now()
+	// Process CPU time is recorded ONLY as ProcessCPUMs. ComputeMs and
+	// OverheadMs stay unmeasured in both records: this probe has no
+	// scope-valid pure-compute source, and the residual is arithmetic
+	// over CPU deltas, not a measured overhead.
 	coord := placement.Measurement{
 		ModelID: *modelID, ModelWeightsHash: hash, NodeID: "local-coord", Role: placement.RoleCoordinator,
 		WallMs:        placement.MeasureQS(wall, "probe wall clock"),
-		ComputeMs:     placement.MeasureQS(coordCPU, "coordinator process CPU time delta (/proc stat utime+stime)"),
+		ProcessCPUMs:  placement.MeasureQS(coordCPU, "coordinator process CPU time delta (/proc stat utime+stime) — CPU consumption, not pure compute"),
 		NetworkPath:   networkPath,
 		RTTMs:         placement.MeasureQS(rtt, "median TCP connect time to the RPC port (loopback handshake)"),
 		BandwidthMbps: placement.MeasureQS(bw, "probe bulk TCP transfer on loopback (32 MiB)"),
 		RTTRounds:     rounds, RPCConnected: true,
 		TensorBytes:  placement.MeasureQS(tensorBytes, "loopback tx byte delta during the request window (tensor payload + protocol overhead + probe HTTP)"),
 		PromptTokens: cr.Usage.PromptTokens, GenTokens: cr.Usage.CompletionTokens,
-		Success: true, Source: "rpc-probe local loopback ggml-rpc run (-ngl 99: all layers on the RPC worker)", At: now,
+		Success: true, Source: "rpc-probe local loopback ggml-rpc run (-ngl 99: all layers on the single RPC worker — full offload, not split-layer joint compute)", At: now,
 	}
 	if cr.Timings != nil {
 		coord.PrefillMs = placement.MeasureQS(cr.Timings.PromptMs, "llama-server timings")
 		coord.DecodeMs = placement.MeasureQS(cr.Timings.PredictedMs, "llama-server timings")
 	}
-	if residual > 0 {
-		coord.OverheadMs = placement.MeasureQS(residual, "residual: wall - coordinator CPU - worker CPU - (RTT x rounds + transfer)")
-	}
-	// residual <= 0: overhead stays unmeasured (never negative).
 	worker := placement.Measurement{
 		ModelID: *modelID, ModelWeightsHash: hash, NodeID: "local-worker", Role: placement.RoleWorker,
-		ComputeMs:    placement.MeasureQS(workerCPU, "worker process CPU time delta (/proc stat utime+stime)"),
+		ProcessCPUMs: placement.MeasureQS(workerCPU, "worker process CPU time delta (/proc stat utime+stime) — CPU consumption, not pure compute"),
 		NetworkPath:  networkPath,
 		RPCConnected: true,
 		Success:      true, Source: "rpc-probe local loopback ggml-rpc run", At: now,
 	}
 
 	summary := map[string]any{
-		"environment":          "isolated local loopback — NOT WAN (Mac↔Oracle) evidence",
-		"network_path":         networkPath,
-		"layer_placement":      "-ngl 99 (all model layers on the RPC worker device)",
-		"model_id":             *modelID,
-		"model_weights_hash":   hash,
-		"wall_ms":              wall,
-		"coordinator_cpu_ms":   coordCPU,
-		"worker_cpu_ms":        workerCPU,
-		"rtt_ms_median_tcp":    rtt,
-		"bandwidth_mbps":       bw,
-		"tensor_bytes_total":   tensorBytes,
-		"rtt_rounds":           rounds,
-		"network_ms_est":       networkMs,
-		"overhead_ms_residual": residual,
-		"overhead_measured":    residual > 0,
-		"prompt_tokens":        cr.Usage.PromptTokens,
-		"gen_tokens":           cr.Usage.CompletionTokens,
+		"environment":                    "isolated local loopback — NOT WAN (Mac↔Oracle) evidence",
+		"network_path":                   networkPath,
+		"layer_placement":                "-ngl 99 (all model layers on the single RPC worker device)",
+		"layer_placement_interpretation": "full offload to one worker; NOT evidence of split-layer CPU+GPU joint computation",
+		"joint_compute_verified":         false,
+		"model_id":                       *modelID,
+		"model_weights_hash":             hash,
+		"wall_ms":                        wall,
+		"coordinator_process_cpu_ms":     coordCPU,
+		"worker_process_cpu_ms":          workerCPU,
+		"process_cpu_note":               "process CPU time (utime+stime) is CPU consumption, not pure compute; it is never fed to admission as compute_ms",
+		"rtt_ms_median_tcp":              rtt,
+		"bandwidth_mbps":                 bw,
+		"tensor_bytes_total":             tensorBytes,
+		"rtt_rounds":                     rounds,
+		"network_ms_est":                 networkMs,
+		"residual_after_process_cpu_ms":  residual,
+		"residual_note":                  "diagnostic arithmetic over process-CPU deltas only; NOT a measured overhead and never an admission input",
+		"overhead_ms":                    nil,
+		"prompt_sha256":                  promptHash(*prompt),
+		"max_tokens_requested":           *maxTokens,
+		"cache_prompt":                   false,
+		"prompt_tokens":                  cr.Usage.PromptTokens,
+		"gen_tokens":                     cr.Usage.CompletionTokens,
 	}
 
 	// Admission connection (shadow): single baseline + these records.
@@ -319,6 +399,20 @@ func main() {
 		}
 		decCoord = load(*predictFrom + "-coordinator.json")
 		decWorker = load(*predictFrom + "-worker.json")
+		// Prior probe runs (pre-correction) stored process CPU deltas
+		// in ComputeMs and the CPU-based residual in OverheadMs. Those
+		// files are rpc-probe outputs, so their semantics are known:
+		// move the CPU value to ProcessCPUMs and clear both admission
+		// inputs rather than letting the old labels re-enter a new
+		// decision as pure compute / measured overhead.
+		for _, m := range []*placement.Measurement{&decCoord, &decWorker} {
+			if !m.ProcessCPUMs.Measured && m.ComputeMs.Measured {
+				m.ProcessCPUMs = placement.MeasureQS(m.ComputeMs.Value,
+					"legacy rpc-probe compute_ms (known process CPU delta, relabeled by the corrected probe)")
+			}
+			m.ComputeMs = placement.UnmeasuredQ()
+			m.OverheadMs = placement.UnmeasuredQ()
+		}
 		summary["prediction_source"] = "prior run " + *predictFrom
 	} else {
 		summary["prediction_source"] = "same run (error figure is circular by construction and reported as such)"
@@ -337,16 +431,42 @@ func main() {
 	inputs.RequestID = "rpc-probe-local"
 	decision := placement.DecideAdmission(inputs, 10)
 	summary["admission_decision"] = decision
-	if pct, ok := placement.PredictionErrorPct(decision, wall); ok {
-		summary["prediction_error_pct"] = pct
-		summary["predicted_joint_ms"] = *decision.PredictedJointMs
-		summary["actual_joint_wall_ms"] = wall
-	} else {
-		summary["prediction_error_pct"] = nil
-		summary["prediction_error_note"] = "no joint prediction was produced (see decision mode/missing), so no error figure exists"
+	// Prediction-vs-actual is reported ONLY for an independent,
+	// condition-controlled cross-run comparison. A same-run figure is
+	// circular by construction (the decision was built from this run)
+	// and must never be reported as prediction success — not even as
+	// an honest-looking 0%.
+	summary["prediction_error_pct"] = nil
+	switch {
+	case *predictFrom == "":
+		summary["prediction_source"] = "same run — no independent prediction exists"
+		summary["prediction_error_note"] = "not an independent prediction: the decision was built from this run's own measurements, so no prediction error is reported (a same-run figure would be a circular residual fit, not model prediction success)"
+	case decision.PredictedJointMs == nil:
+		summary["prediction_error_note"] = "the prior-run decision produced no joint prediction (see decision mode/missing), so no error figure exists"
+	default:
+		priorData, err := os.ReadFile(*predictFrom + "-summary.json")
+		if err != nil {
+			summary["prediction_error_note"] = "prior run summary could not be read, so its run conditions cannot be verified and no error figure is reported"
+			break
+		}
+		var priorSummary map[string]any
+		if err := json.Unmarshal(priorData, &priorSummary); err != nil {
+			summary["prediction_error_note"] = "prior run summary does not decode, so its run conditions cannot be verified and no error figure is reported"
+			break
+		}
+		if valid, why := controlledComparison(priorSummary, summary); !valid {
+			summary["prediction_error_note"] = "cross-run comparison rejected: " + why
+		} else if pct, ok := placement.PredictionErrorPct(decision, wall); ok {
+			summary["prediction_error_pct"] = pct
+			summary["predicted_joint_ms"] = *decision.PredictedJointMs
+			summary["actual_joint_wall_ms"] = wall
+			summary["prediction_error_note"] = why
+		} else {
+			summary["prediction_error_note"] = "no valid prediction error could be computed for the controlled comparison"
+		}
 	}
 	summary["production_verified"] = decision.ProductionVerified
-	summary["note"] = "experimental eligibility on loopback is not production verification and not WAN evidence; routing is unchanged (shadow). Both processes share this host's CPU and the thread configs of baseline and joint runs differ, so any saving figure is a pipeline demonstration, not a performance result."
+	summary["note"] = "loopback shadow output is not production verification and not WAN evidence; routing is unchanged (shadow). Both processes share this host's CPU, so process-CPU figures are host-local diagnostics, not distributed-performance evidence."
 
 	write := func(path string, v any) {
 		data, _ := json.MarshalIndent(v, "", "  ")

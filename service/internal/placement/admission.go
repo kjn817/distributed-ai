@@ -137,6 +137,7 @@ var MeasurementScopes = map[string]string{
 	"best_single_ms": "end-to-end wall time of the request on the best single node (its prefill+decode), excluding client-side network",
 	"coordinator_ms": "pure compute time attributed to the coordinator in a joint run; excludes RPC transfer time and synchronization waits",
 	"worker_ms":      "pure compute time attributed to the worker in a joint run; excludes RPC transfer time and synchronization waits",
+	"process_cpu_ms": "diagnostic process CPU time delta (utime+stime) for a role; includes spin and scheduler effects, is never a pure-compute substitute, and is not an admission input",
 	"rtt_ms":         "one round trip on the coordinator↔worker path; total latency is priced as rtt_ms × rtt_rounds and must not also be included in compute times",
 	"transfer_ms":    "derived once from payload_bytes × 8 / bandwidth; never also included in overhead_ms",
 	"overhead_ms":    "measured residual overhead (serialization, scheduling, engine coordination) excluding transfer time, which is computed separately",

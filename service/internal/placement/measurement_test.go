@@ -167,6 +167,40 @@ func TestMeasurementGapsStayUnmeasured(t *testing.T) {
 	}
 }
 
+func TestProcessCPUTimeIsNotCompute(t *testing.T) {
+	// A collector that only knows process CPU time (utime+stime) has
+	// NOT measured pure compute. The builder must leave both compute
+	// inputs unmeasured and the decision must degrade honestly,
+	// even when every other quantity is present.
+	s := NewMemoryMeasurementStore(16)
+	s.Record(Measurement{ModelID: "m1", NodeID: "solo", Role: RoleSingle,
+		WallMs: MeasureQ(225), Success: true})
+	s.Record(Measurement{ModelID: "m1", NodeID: "coord", Role: RoleCoordinator,
+		ProcessCPUMs: MeasureQS(20, "process CPU delta"), NetworkPath: "coord->w1",
+		RTTMs: MeasureQ(1), BandwidthMbps: MeasureQ(1000), RTTRounds: 9,
+		RPCConnected: true, TensorBytes: MeasureQ(1024), Success: true})
+	s.Record(Measurement{ModelID: "m1", NodeID: "w1", Role: RoleWorker,
+		ProcessCPUMs: MeasureQS(1230, "process CPU delta"), NetworkPath: "coord->w1",
+		RPCConnected: true, Success: true})
+
+	in := BuildAdmissionInputs(s, s, Request{ModelID: "m1"}, distributedAssignment())
+	if in.CoordinatorMs.Measured || in.WorkerMs.Measured {
+		t.Fatalf("process CPU leaked into compute inputs: coord=%+v worker=%+v", in.CoordinatorMs, in.WorkerMs)
+	}
+	d := DecideAdmission(in, 10)
+	if d.Mode != ModeInsufficientData {
+		t.Fatalf("decision = %s, want insufficient_data (no pure compute measured)", d.Mode)
+	}
+	for _, want := range []string{"coordinator_ms", "worker_ms"} {
+		if !strings.Contains(strings.Join(d.Missing, " "), want) {
+			t.Errorf("missing list should name %s: %v", want, d.Missing)
+		}
+	}
+	if scope := MeasurementScopes["process_cpu_ms"]; !strings.Contains(scope, "never") {
+		t.Errorf("process_cpu_ms scope must state it is never a pure-compute substitute: %q", scope)
+	}
+}
+
 func TestPredictionErrorPct(t *testing.T) {
 	d := DecideAdmission(fullInputs(), 10)
 	if d.PredictedJointMs == nil {

@@ -12,7 +12,10 @@ package placement
 // compute (no network, no sync waits), network time is priced once via
 // RTT × rounds + derived transfer, overhead is the residual only.
 // Collectors must respect the scopes when filling fields — a collector
-// that records end-to-end wall time belongs in WallMs, not ComputeMs.
+// that records end-to-end wall time belongs in WallMs, not ComputeMs,
+// and a process CPU-time delta belongs in ProcessCPUMs, never in
+// ComputeMs: CPU time includes spin and scheduler effects and is not,
+// by itself, pure compute.
 
 import (
 	"crypto/sha256"
@@ -56,7 +59,13 @@ type Measurement struct {
 	DecodeMs  Quantity `json:"decode_ms"`
 	// ComputeMs: pure compute attributed to this node in a joint run
 	// (scope: excludes RPC transfer and synchronization waits).
-	ComputeMs       Quantity `json:"compute_ms"`
+	ComputeMs Quantity `json:"compute_ms"`
+	// ProcessCPUMs: process CPU time (utime+stime) consumed by this
+	// node's process during the run. This is a diagnostic CPU-cost
+	// measurement, NOT pure compute: multithreaded engines can burn
+	// CPU spinning, so a CPU delta can exceed the wall time and must
+	// never be copied into ComputeMs or used as an admission input.
+	ProcessCPUMs    Quantity `json:"process_cpu_ms"`
 	PromptTokens    int      `json:"prompt_tokens,omitempty"`
 	GenTokens       int      `json:"gen_tokens,omitempty"`
 	TokensPerSecond Quantity `json:"tokens_per_second"`
@@ -208,8 +217,10 @@ func successful(ms []Measurement, role, nodeID string) []Measurement {
 //   - best_single_ms: the fastest successful single-node run — WallMs
 //     when measured, else PrefillMs+DecodeMs when both are measured.
 //   - coordinator/worker compute: successful records for the assigned
-//     nodes. Multi-worker cohorts are not aggregated (v1 models the
-//     single-worker case; anything else leaves worker_ms unmeasured).
+//     nodes. ProcessCPUMs is deliberately ignored here — it is CPU
+//     consumption, not scope-valid pure compute. Multi-worker cohorts
+//     are not aggregated (v1 models the single-worker case; anything
+//     else leaves worker_ms unmeasured).
 //   - network quantities come from the coordinator's record, and are
 //     accepted only when a worker record shares the same NetworkPath.
 //   - rpc_reachable requires RPCConnected on BOTH the coordinator and
